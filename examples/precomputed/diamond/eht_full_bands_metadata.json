@@ -1,0 +1,14 @@
+{
+  "material": "diamond",
+  "source": "Archived original YAeHMOP *fitted physical* eigenvalues, no new calculation",
+  "provenance": "propose_6/results/fit_pbe_DFT_DZVP_rc4/diamond_2/matched_bands.npz",
+  "reference_origin": "The original fit used independent PySCF/GTH-PBE; DFT source bands are NOT redistributed here",
+  "note": "Other orbitals besides the 1V+1C fitting window were NOT fitted to a reference",
+  "nocc_spatial": 4,
+  "orbitals": 8,
+  "kpoints": 25,
+  "geometry": "examples/structures/diamond.cif",
+  "energy_units": "eV",
+  "k_coordinates": "fractional reciprocal",
+  "not_a_converged_predictive_result": true
+}
