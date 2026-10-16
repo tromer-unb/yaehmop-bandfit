@@ -3,7 +3,7 @@
 **Fit and visualize electronic bands with physical extended Hückel theory — 2, 4, 6 or 8 bands.**
 
 [![Lightweight I/O tests](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml/badge.svg)](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml)
-[Quick examples](#quick-start) · [SnS₂ / paper Fig. 4](#featured-example-sns₂--paper-figure-4) · [All six compounds](docs/CHALCOGENIDES.md) · [Carbon extension](docs/BEST_RESULTS.md) · [Image and CSV input](docs/IMAGE_INPUT.md) · [All CLI flags](docs/CLI_REFERENCE.md)
+[**Fit YOUR CIF + PNG**](docs/FIT_YOUR_MATERIAL.md) · [**Guia em português**](docs/GUIA_RAPIDO_PT.md) · [Quick examples](#quick-start) · [SnS₂ / paper Fig. 4](#featured-example-sns₂--paper-figure-4) · [Shared transfer](docs/SHARED_FITTING.md) · [All six compounds](docs/CHALCOGENIDES.md) · [Carbon results](docs/BEST_RESULTS.md) · [All CLI flags](docs/CLI_REFERENCE.md)
 
 The **original study** evaluates **six Ge/Sn chalcogenides** — **GeS, GeSe, GeTe, SnS₂, SnSe and SnTe** — with exactly matched **1V+1C, 2V+2C, 3V+3C and 4V+4C** reference/model windows. It also measures chemical leave-one-system-out transferability. **Graphene, phagraphene, diamond and graphite are later carbon extensions**, not the entire scope of this work.
 
@@ -17,6 +17,43 @@ python3 quick.py
 ```
 
 **That is all you need to see the paper examples.** The command generates saved-band figures, the SnS₂ comparison, six-material summaries, carbon-extension plots, and a PNG-to-bands demonstration in `outputs/quick/`. **No YAeHMOP solver, DFT calculation, optimizer, network download or huge dataset required.**
+
+## Fit YOUR OWN crystal: CIF + PNG → parameters → all EHT bands
+
+**New user? Start here:** [Complete copy-and-paste tutorial (English)](docs/FIT_YOUR_MATERIAL.md) · [Passo a passo em português](docs/GUIA_RAPIDO_PT.md).
+
+Provide **structure.cif** + **bands.png** (or exact numeric CSV), edit one **file.ini** containing the plot energy limits and **correct reciprocal path**, and run:
+
+~~~bash
+# Working directory: cloned repository root
+mkdir -p inputs/my_material
+cp /your/path/structure.cif inputs/my_material/structure.cif
+cp /your/path/bands.png inputs/my_material/bands.png
+cp examples/configs/material_2bands_template.ini inputs/my_material/file.ini
+# EDIT file.ini: actual emin/emax, reciprocal nodes, labels and band count!
+
+# 1. Extract/check the image (NO solver)
+python USER_WORKFLOW/bands_fit.py \
+  inputs/my_material/structure.cif inputs/my_material/file.ini \
+  --prepare-only --outdir outputs/my_material
+
+# 2. Fit 1 valence + 1 conduction band (runs YOUR installed YAeHMOP)
+python USER_WORKFLOW/bands_fit.py \
+  inputs/my_material/structure.cif inputs/my_material/file.ini \
+  --pairs 1 --budget 400 --outdir outputs/my_material
+
+# 3. Recompute ALL orbital bands using the fitted atomic table and K
+python USER_WORKFLOW/bands_fit.py \
+  inputs/my_material/structure.cif inputs/my_material/file.ini \
+  --from-fit outputs/my_material/fit/fit.json \
+  --outdir outputs/my_material_full
+~~~
+
+**Before step 2:** install YAeHMOP separately and set **YAEHMOP_BIND** and **YAEHMOP_PARAM_FILE** to your native solver/table ([installation](docs/INSTALLATION.md)); inspect **outputs/my_material/reference_prepared/extraction_preview.png** to verify curve extraction. Expected fit outputs: **bands_comparison.png/.pdf/.csv**, **fit/param_best_native.dat**, **fit/fit.json** and **run_summary.json**. The full recomputation creates **bands_full.png/.csv/.npz**.
+
+**PNG pipeline:** [inspect → select visible curves → standardize to bands_N_layers.png → numerical CSV + QA](docs/FIT_YOUR_MATERIAL.md#2-inspect-the-png-and-prepare-the-band-reference-fast-no-solver). PNG/JPEG/TIFF/WebP and CSV are supported; user-reported image axes/paths must match the actual DFT reference. **--image** and **--png** are both valid aliases. Use **--pairs 2/3/4** only if the reference really contains 4/6/8 identifiable bands. Complete [flags](docs/CLI_REFERENCE.md).
+
+**Multi-material?** See [transferability guide](docs/SHARED_FITTING.md). The shared YAML prototype exists but does **not yet** expose the same turnkey 2/4/6/8-band PNG contract as this individual-material workflow. The carbon double-zeta patch is experimental. Ideal gapless graphene, metallic and SOC/spin-polarized references require other objectives.
 
 ## Featured example: SnS₂ — paper Figure 4
 
