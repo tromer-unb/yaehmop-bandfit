@@ -183,6 +183,9 @@ tests/                    fast CI-safe regressions (NO native physics runs)
 
 ## Scientific scope, attribution and licensing
 
+An optional, **research-only native 2p double-zeta C patch** is documented in [experimental/README.md](experimental/README.md). It is not applied to stock YAeHMOP, not built by CI, and does not include upstream native sources, binaries or original atomic tables.
+
+
 This project is a user-facing frontend for **YAeHMOP** and is **not** an upstream YAeHMOP distribution. The upstream engine, its original C sources and atomic parameter tables are **not included**. YAeHMOP is credited to G. A. Landrum and collaborators; please cite the upstream code and relevant papers in downstream publications.
 
 The repository retains the owner's existing **MIT LICENSE** for its own newly distributed material; separate dependencies and original YAeHMOP remain governed by their own licenses. The example synthetic spectra were generated from original toy equations. Precomputed EHT fixtures contain derived results and detailed source metadata; external PySCF/PBE numerical reference spectra are deliberately omitted.
