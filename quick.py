@@ -2,12 +2,15 @@
 """One-command, research-faithful showcase: saved data ONLY, no physics runs.
 
 Usage:
-  python quick.py              # ALL instant examples + plot-encoding demo
-  python quick.py best         # BEST scientifically audited RMSE comparisons
-  python quick.py graphene     # best C2DB fitted EHT graphene bands (no PBE arrays)
-  python quick.py transfer     # shared sp5 graphene + blind phagraphene predictions
-  python quick.py carbon       # archived full EHT frontier orbitals, 2D/3D
-  python quick.py image        # toy RGB -> N=2 layered PNG + QA, no solver
+  python quick.py                 # P5 six chalcogenides FIRST, Fig. 4 SnS2 + carbon
+  python quick.py sns2            # Figure 4: SnS2 2/4/6/8 fitted bands
+  python quick.py materials       # All six Ge/Sn systems across 2/4/6/8
+  python quick.py chemical-transfer # Leave-one-compound-out, NOT a direct fit
+  python quick.py best            # Full matched-window study + separate carbon scores
+  python quick.py graphene        # Best external C2DB-fitted graphene pDZ7
+  python quick.py transfer        # Carbon shared sp5 + blind phagraphene
+  python quick.py carbon          # Saved full EHT bands graphene/diamond/graphite
+  python quick.py image           # Synthetic RGB -> bitplane PNG, no solver
 
 Only stdlib+NumPy+matplotlib+Pillow and dependencies in requirements.txt.
 """
@@ -87,7 +90,7 @@ def results(out):
        "C2DB and PySCF: DIFFERENT PBE references — only compare within panels. "
        "Phagraphene: Γ-only SCF, 9-node pilot.",
        ha="center",fontsize=10.5,fontweight="bold",color="#526171")
-    save(fig,out/"best_results.png")
+    save(fig,out/"carbon_best_results.png")
     print("BEST GRAPHENE (C2DB): p-DZ7, RMSE 0.3223 eV; stock sp5 0.5823 eV.")
     print("BEST GRAPHENE (PySCF): local sp5, RMSE 0.1657 eV; shared sp5 0.1683 eV.")
     print("BLIND PHAGRAPHENE: shared sp5, RMSE 0.1564 eV (Γ-only 9-k pilot).")
@@ -173,16 +176,40 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__,
       formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("example",nargs="?",default="all",
-      choices=("all","best","graphene","transfer","carbon","image"),
-      help="default all: best-fit dashboard + original EHT spectra + a PNG-to-bitplane demo")
+      choices=("all","best","sns2","SnS2","materials","chemical-transfer",
+               "GeS","GeSe","GeTe","SnSe","SnTe",
+               "graphene","transfer","carbon-transfer","carbon","image"),
+      help="default all: P5 Ge/Sn matched-window fits FIRST, paper Fig.4 SnS2,"
+           "then P6/P7 carbon extension and a tiny PNG input demo")
     p.add_argument("--outdir",type=Path,default=Path("outputs/quick"),
                    help="Output folder (default: outputs/quick)")
     a=p.parse_args(argv)
     style();out=a.outdir
-    print("\nYAeHMOP BAND FIT | INSTANT SAVED EXAMPLES (NO DFT / NO FIT / NO SOLVER)")
-    if a.example in ("all","best"):results(out)
+    sys.path.insert(0,str(ROOT/"scripts"))
+    from chalcogenide_showcase import (
+        make_global,make_heatmap,individual,winners,MATERIALS)
+    print("\nYAeHMOP BAND FIT | COMPLETE PAPER · INSTANT SAVED EXAMPLES")
+    print("P5 original Ge/Sn chalcogenides (2/4/6/8 bands) + P6/P7 carbon extension")
+    print("NO DFT / NO FIT / NO SOLVER / NO INTERNET")
+    if a.example in ("all","best","materials"):
+        print("\n[1] MAIN STUDY · six Ge/Sn chalcogenides, matched windows")
+        make_global(out)
+        make_heatmap(out,"direct")
+        winners()
+    if a.example in ("all","sns2","SnS2"):
+        print("\n[2] PAPER FIGURE 4 · SnS2, matched 2/4/6/8 bands")
+        individual(out,"SnS2")
+    elif a.example in MATERIALS:
+        print("\n[2] INDIVIDUAL MATERIAL ·",a.example)
+        individual(out,a.example)
+    if a.example in ("all","chemical-transfer"):
+        print("\n[3] CHEMICAL TRANSFER · hold out one of six Ge/Sn compounds")
+        make_heatmap(out,"zero-shot")
+    if a.example in ("all","best"):
+        print("\n[4] SEPARATE CARBON EXTENSION (different PBE references)")
+        results(out)
     if a.example in ("all","graphene"):graphene(out)
-    if a.example in ("all","transfer"):transfer(out)
+    if a.example in ("all","transfer","carbon-transfer"):transfer(out)
     if a.example in ("all","carbon"):carbon(out)
     if a.example in ("all","image"):image(out)
     print("\nDONE. Open PNG figures in",out.resolve())

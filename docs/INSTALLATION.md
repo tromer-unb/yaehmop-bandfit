@@ -10,6 +10,8 @@ cd yaehmop-bandfit
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python quick.py                 # See all six Ge/Sn materials + SnS₂ Fig. 4 FIRST
+python quick.py sns2            # Just SnS₂ paper Figure 4
 python USER_WORKFLOW/bands_fit.py --help
 ```
 

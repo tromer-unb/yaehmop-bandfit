@@ -38,12 +38,17 @@ class QuickShowcaseTests(unittest.TestCase):
             result=subprocess.run([sys.executable,str(R/"quick.py"),"--outdir",str(dest)],
                   cwd=R,capture_output=True,text=True,timeout=35,check=True)
             for p in [
-              "best_results.png","graphene_best_pdz7.png",
+              "overall_2_4_6_8.png","six_materials_direct.png",
+              "SnS2_paper_Fig4_PBE_vs_EHT.png","SnS2_2_4_6_8_eht.png",
+              "six_materials_zero_shot.png","carbon_best_results.png",
+              "graphene_best_pdz7.png",
               "transfer_graphene_phagraphene.png",
               "carbon_graphene_diamond_graphite.png",
               "image_input/bands_2_layers.png","image_input/extraction_qa.json",
             ]:
                 self.assertGreater((dest/p).stat().st_size,1000,p)
+            self.assertIn("SnS₂ 1V+1C: 0.1043 eV",result.stdout)
+            self.assertIn("Best 4-band direct material: SnTe",result.stdout)
             self.assertIn("0.3223",result.stdout)
             self.assertIn("0.1657",result.stdout)
             self.assertIn("0.1564",result.stdout)
@@ -52,7 +57,7 @@ class QuickShowcaseTests(unittest.TestCase):
         readme=(R/"README.md").read_text()
         prefix=readme[:1800]
         self.assertIn("python3 quick.py",prefix)
-        self.assertIn("![Best verified",prefix)
+        self.assertIn("paper Fig. 4",prefix)
         self.assertIn("docs/BEST_RESULTS.md",prefix)
         self.assertIn("different",readme.lower())
 if __name__=="__main__":unittest.main()

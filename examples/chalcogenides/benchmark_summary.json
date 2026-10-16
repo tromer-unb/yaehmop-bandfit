@@ -1,0 +1,61 @@
+{
+  "title": "Matched 2/4/6/8-band calibration and chemical zero-shot transfer, six Ge/Sn chalcogenides",
+  "source": "Original P5 Materials Cloud/C2DB PBE direct-fit and leave-one-chemical-system-out arrays; paper Figs 2\u20135",
+  "materials": [
+    "GeS",
+    "GeSe",
+    "GeTe",
+    "SnS2",
+    "SnSe",
+    "SnTe"
+  ],
+  "windows": [
+    2,
+    4,
+    6,
+    8
+  ],
+  "selected_states": "Exactly N/2 reference valence + N/2 reference conduction bands, with same N EHT eigenvalues in the score",
+  "all_csv_spectra": "YAeHMOP EHT predictions only; third-party PBE target arrays are not included",
+  "direct_vs_holdout": "Direct fits were trained on each target; zero-shot shared predictions had the material excluded from the fit",
+  "ineligible_cases": "Missing entries are missing/unsupported folds, never zeros. GeTe has no eligible 8-band direct fit.",
+  "summary": {
+    "direct": {
+      "2": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.22927770599066666
+      },
+      "4": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.2481850780311667
+      },
+      "6": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.27325835332816667
+      },
+      "8": {
+        "n_materials": 5,
+        "mean_rmse_eV": 0.3205817542798
+      }
+    },
+    "zero-shot shared": {
+      "2": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.8069347747254999
+      },
+      "4": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.9088250866421665
+      },
+      "6": {
+        "n_materials": 6,
+        "mean_rmse_eV": 0.7038240645768333
+      },
+      "8": {
+        "n_materials": 4,
+        "mean_rmse_eV": 3.41591345091375
+      }
+    }
+  },
+  "reference_provenance": "Materials Cloud PBE; consult source paper for settings and external attribution; these archives are not independent PBE redistributions."
+}

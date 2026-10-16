@@ -1,18 +1,30 @@
+> **Carbon extension only.** The original paper's main dataset comprises
+> **GeS, GeSe, GeTe, SnS₂, SnSe and SnTe** with matched **2/4/6/8-band**
+> calibration and full chemical zero-shot validation. **Start with
+> [the original six-material benchmark and SnS₂ Figure 4](CHALCOGENIDES.md).**
+> This page describes the later graphene/phagraphene/diamond/graphite work.
+
+---
+
 # Best results first — real saved EHT bands, instant examples
 
-The command `python3 quick.py` runs the **showcase entirely offline**, using archived numerical YAeHMOP predictions and previously audited summary errors. It is intended for **readers of the paper who want to see the best working examples immediately**, not to train a new Hamiltonian.
+The command `python3 quick.py carbon` or `python3 quick.py graphene` explores
+carbon; `python3 quick.py` also shows the original Ge/Sn results **first** and
+then generates the **carbon extension** entirely offline, using archived numerical YAeHMOP predictions and previously audited summary errors. It is intended for **readers of the paper who want to see the best working examples immediately**, not to train a new Hamiltonian.
 
 ## One-command gallery
 
 ```bash
-python3 quick.py
+python3 quick.py best       # both P5 six-material outcomes and separate carbon
+python3 quick.py graphene   # graphene C2DB p-DZ7 fit, archived EHT
+python3 quick.py transfer   # graphene / phagraphene family
 ```
 
-Produced in `outputs/quick/`:
+Carbon-extension outputs in `outputs/quick/`:
 
 | Figure/file | Scientific content |
 |---|---|
-| `best_results.png` | Three clearly separated PBE benchmark groups, with RMSE in eV. |
+| `carbon_best_results.png` | Three clearly separated PBE benchmark groups, with RMSE in eV. |
 | `graphene_best_pdz7.png` | **Best graphene model against external C2DB PBE:** native genuine 2p-double-zeta p-DZ7, saved 361-node **EHT** valence and conduction predictions. |
 | `transfer_graphene_phagraphene.png` | Same **frozen shared sp5** carbon parameters: graphene training bands and independently tested phagraphene holdout predictions. |
 | `carbon_graphene_diamond_graphite.png` | Saved full-Hamiltonian YAeHMOP frontier orbitals from the earlier separately fitted graphene/diamond/graphite experiments. |

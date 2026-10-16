@@ -1,4 +1,24 @@
-# Reproducible examples — no cloud calculation
+# Original six Ge/Sn chalcogenides — start here
+
+The paper does **not** focus solely on carbon. Its central fitting experiment
+covers **GeS, GeSe, GeTe, SnS₂, SnSe and SnTe** with 2/4/6/8 selected
+valence/conduction bands.
+
+```bash
+python3 quick.py sns2          # PAPER FIGURE 4, four SnS₂ fitted windows
+python3 quick.py materials     # all six compounds in one heatmap
+python3 quick.py chemical-transfer
+python3 quick.py SnTe          # best 4-, 6- and 8-band direct-fit system
+```
+
+[Complete Ge/Sn dataset and metrics](CHALCOGENIDES.md) ·
+[Paper Fig. 4](../assets/paper_fig04_SnS2.png)
+
+---
+
+## Later carbon extensions
+
+## Carbon and synthetic examples — no cloud calculation
 
 This repository includes three different categories of demonstration. They serve different scientific purposes; do not present them as equivalent.
 
