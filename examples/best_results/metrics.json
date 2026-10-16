@@ -1,0 +1,52 @@
+{
+  "source_notice": "Metrics audited from propose_9 saved arrays. CSV files distribute only original YAeHMOP EHT predictions; no external PBE reference curves. Values cannot be pooled across C2DB and independent PySCF reference sources.",
+  "graphene_c2db": {
+    "target": "External C2DB PBE/no SOC, same 400-point original curve interpolated on 361 EHT nodes; trained on 37 nodes; NOT 361 independent DFT.",
+    "best_model": "Native true carbon 2p double-zeta p-DZ7, 7 active variables; requires optional patched YAeHMOP, not stock.",
+    "best_rmse_eV": 0.3223099313513552,
+    "comparison_model": "Single-zeta sp5, original YAeHMOP",
+    "comparison_rmse_eV": 0.5822773337396134,
+    "fitted_parameters": {
+      "Es_eV": -22.55867857634238,
+      "zeta_s": 2.8360120667296433,
+      "Ep_eV": -19.536735435070756,
+      "zeta_p1": 1.6792937388858635,
+      "zeta_p2": 2.7402308379800138,
+      "ratio_c2_c1": 0.781232649690947,
+      "K": 2.0016866418080506
+    },
+    "prediction_csv": "examples/best_results/graphene_c2db_pdz7.csv"
+  },
+  "graphene_pyscf": {
+    "target": "Independent PySCF/GTH-SZV PBE; different reference from external C2DB.",
+    "system_specific_sp5_rmse_eV": 0.16569896052970817,
+    "shared_sp5_rmse_eV": 0.16831147428456159,
+    "shared_training": [
+      "graphene",
+      "t_graphene",
+      "net_c"
+    ],
+    "shared_sp5_parameters": {
+      "Es_eV": -13.190198983457268,
+      "zeta_s": 2.634063113636377,
+      "Ep_eV": -9.431812309188313,
+      "zeta_p": 2.0384886384108434,
+      "K": 3.2240164367812105
+    },
+    "prediction_csv": "examples/best_results/graphene_pyscf_sp5_shared.csv"
+  },
+  "family_pyscf": {
+    "reference": "PySCF/GTH-SZV PBE for 2D carbon. Phagraphene SCF Gamma-only, 9 sampled path nodes; not Dirac or gap converged.",
+    "trained": {
+      "graphene": 0.16831147428456159,
+      "t_graphene": 0.160113562306,
+      "net_c": 0.157041396479
+    },
+    "heldout_phagraphene_shared_sp5_rmse_eV": 0.15643801168366284,
+    "heldout_phagraphene_nested_pdz7_rmse_eV": 0.1562805578727026,
+    "nested_pdz7_note": "Numerically smallest heldout error but near-zero second 2p radial coefficient, not evidence that double-zeta improves transfer.",
+    "recommended_model": "Simpler frozen shared sp5 (0.15644 eV held-out)",
+    "prediction_csv": "examples/best_results/phagraphene_pyscf_sp5_holdout.csv"
+  },
+  "disclaimer": "Training performance is not transfer. Comparisons are only within the same reference dataset and benchmark definition."
+}
