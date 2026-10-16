@@ -1,5 +1,7 @@
 # YAeHMOP BandFit
 
+[![Lightweight I/O tests](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml/badge.svg)](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml)
+
 **Reproducible extended Hückel band-structure fitting from crystal structures and electronic-band data.**
 
 [Installation](docs/INSTALLATION.md) · [Quick start](#quick-start-no-electronic-structure-calculation) · [Image conversion](docs/IMAGE_INPUT.md) · [Numerical CSV](docs/NUMERIC_BANDS.md) · [All CLI options](docs/CLI_REFERENCE.md) · [Examples](docs/EXAMPLES.md) · [Scientific scope](docs/SCIENTIFIC_SCOPE.md)
@@ -101,6 +103,15 @@ See [Image input, color tracing and QA](docs/IMAGE_INPUT.md).
 </details>
 
 ## Explore saved individual bands from the paper systems
+
+### Examples at a glance
+
+The following panels are **archived original-YAeHMOP EHT** frontier bands (not independently computed DFT). They can be recreated locally using `scripts/plot_saved_bands.py` without installing YAeHMOP.
+
+| Graphene — 2D | Diamond — 3D | AB graphite — 3D |
+|:---:|:---:|:---:|
+| ![Saved graphene EHT frontier bands](examples/precomputed/graphene/frontier.png) | ![Saved diamond EHT frontier bands](examples/precomputed/diamond/frontier.png) | ![Saved AB graphite EHT frontier bands](examples/precomputed/graphite_AB/frontier.png) |
+
 
 No solver, no optimization, no DFT required:
 
