@@ -123,3 +123,39 @@ O programa **parameter_fitter/fit_shared.py** aceita YAML com vários sistemas d
 O ajuste por imagem exige bandas e gap identificáveis, uma base orbital suportada e um caminho k correto. Grafeno com cone de Dirac, metais, sistemas magnéticos e SOC precisam de tratamento especializado. O patch de dupla-zeta **2p do carbono** é experimental, separado do executável original e não valida automaticamente bases duplas de outros elementos.
 
 **Mais detalhes:** [guia completo em inglês](FIT_YOUR_MATERIAL.md), [entrada de imagens](IMAGE_INPUT.md), [flags](CLI_REFERENCE.md) e [instalação](INSTALLATION.md).
+
+
+## 7. Novos comandos: escolha, transferência congelada e uma família de materiais
+
+Para entender qual caminho iniciar, sem rodar YAeHMOP:
+
+~~~bash
+python USER_WORKFLOW/strategy_advisor.py --cif SEU.cif --reference bandas.png   --goal direct --electronic semiconductor --bands auto
+~~~
+
+**Modo DIRETO:** já descrito nas seções anteriores. Ajusta o parâmetro para o material informado a partir de seu PNG/CSV DFT calibrado.
+
+**Modo TRANSFERÊNCIA CONGELADA:** primeiro ajuste o sistema fonte e guarde outputs/fonte/run_summary.json. Em outro CIF com referência própria, faça:
+
+~~~bash
+python USER_WORKFLOW/frozen_transfer.py ALVO.cif ALVO.ini   --source-run outputs/fonte/run_summary.json --pairs 1   --outdir outputs/alvo_congelado
+~~~
+
+O programa reaplica exatamente a tabela e K da fonte, calcula o espectro físico com o YAeHMOP uma única vez e mede o RMSE das 2 bandas, sem nova otimização. Saídas: bands_comparison.png, bands_full.npz, transfer_report.json e QA do PNG. **Isso não equivale a teste cego se o alvo já influenciou o desenvolvimento anterior.** Novos elementos ausentes da tabela da fonte não podem ter parâmetros adivinhados.
+
+**Modo FAMÍLIA:** para ajustar **um vetor compartilhado** em dois ou mais CIFs e avaliar outro CIF totalmente reservado:
+
+~~~bash
+cp examples/transfer/family_template.yaml familia.yaml
+# Edite nomes, CIFs, PNGs/CSV, INIs e role: train/test.
+python USER_WORKFLOW/family_fit.py familia.yaml --validate-only
+python USER_WORKFLOW/family_fit.py familia.yaml --prepare-only --outdir outputs/familia
+# Confira todas as prévias de bandas de treino.
+python USER_WORKFLOW/family_fit.py familia.yaml --fit --budget 400 --outdir outputs/familia
+~~~
+
+Referências de teste só são abertas para calcular os erros **depois** de congelar os parâmetros. As referências de treino devem possuir 2, 4, 6 ou 8 curvas selecionadas por entrada de acordo com n_pairs.
+
+**PNG:** qualquer raster comum precisa informar eixos em eV, caminho k do CIF e curvas identificáveis. O bands_N_layers.png é gerado automaticamente como 8-bit com um bit para cada banda, preservando cruzamentos **já observados**. Não reconstrói curvas totalmente escondidas. Prefira CSV para curvas coincidentes. Veja [guia do PNG](PNG_STANDARD.md) e [início completo](START_HERE.md).
+
+**Limite físico:** esse fluxo público não trata automaticamente metais 1T, cone de Dirac do grafeno ou SOC. A P27/P28 demonstrou que menor erro de bandas pode piorar a superfície de Fermi. Não misture otimização direta com transferência e não atribua validade universal ao modelo.

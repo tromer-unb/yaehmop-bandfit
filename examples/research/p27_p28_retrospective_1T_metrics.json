@@ -1,0 +1,46 @@
+{
+  "scope": "P27/P28 retrospective 1T MX2 study, processed metrics only, no C2DB bands",
+  "source_proposal": "P28 audit freeze 2026-10-17",
+  "trained_corrections_only_on": "1WS2-2",
+  "all_others_posthoc_not_prospective_blind": true,
+  "comparison": "2 frontier bands path PBE noSOC vs EHT with historic midgap alignment",
+  "units": "RMSE eV",
+  "models": {
+    "P16": {
+      "material_rmse_eV": {
+        "1WS2-2": 0.13255098611555036,
+        "1WSe2-2": 0.2648512586722982,
+        "1MoS2-2": 0.193562453338684,
+        "1MoSe2-2": 0.2697970209414787
+      },
+      "WS2_training_path_RMSE_eV": 0.13255098611555036,
+      "WS2_DOS_EF_states_per_eV_cell": 1.64174371136334,
+      "WS2_hard_fermi_IoU_N12": 0.5151515151515151
+    },
+    "P27_CF3": {
+      "material_rmse_eV": {
+        "1WS2-2": 0.1020087726147333,
+        "1WSe2-2": 0.19979089041477435,
+        "1MoS2-2": 0.12836010628483138,
+        "1MoSe2-2": 0.2316541388194889
+      },
+      "WS2_training_path_RMSE_eV": 0.1020087726147333,
+      "WS2_DOS_EF_states_per_eV_cell": 1.3549308396731414,
+      "WS2_hard_fermi_IoU_N12": 0.2727272727272727
+    },
+    "F3PD": {
+      "material_rmse_eV": {
+        "1WS2-2": 0.09149033821396206,
+        "1WSe2-2": 0.24894038658075585,
+        "1MoS2-2": 0.13073960452707176,
+        "1MoSe2-2": 0.2802609488252185
+      },
+      "WS2_training_path_RMSE_eV": 0.09149033821396206,
+      "WS2_DOS_EF_states_per_eV_cell": 1.9516638763597056,
+      "WS2_hard_fermi_IoU_N12": 0.38461538461538464
+    }
+  },
+  "recommended_family_default": "P16",
+  "F3PD_preregistered_gate_passed": false,
+  "warning": "These are finite-reference retrospective research comparisons; P28 F3PD is NOT the stock YAeHMOP native parameter format and NOT a general public fitting flag."
+}

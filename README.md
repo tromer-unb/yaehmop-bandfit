@@ -7,6 +7,38 @@
 
 The **original study** evaluates **six Ge/Sn chalcogenides** — **GeS, GeSe, GeTe, SnS₂, SnSe and SnTe** — with exactly matched **1V+1C, 2V+2C, 3V+3C and 4V+4C** reference/model windows. It also measures chemical leave-one-system-out transferability. **Graphene, phagraphene, diamond and graphite are later carbon extensions**, not the entire scope of this work.
 
+## Quick access: direct versus transfer
+
+
+**Choose your workflow (tested Python front-end):**
+[Installation and three-step guide](docs/START_HERE.md) ·
+[Single-material direct fit](docs/FIT_YOUR_MATERIAL.md) ·
+[Frozen evaluation on another CIF](docs/START_HERE.md#4-option-b-frozen-transfer-no-refit) ·
+[Fit one shared vector to a family](docs/FAMILY_FIT.md) ·
+[Ordinary PNG and internal bitplanes](docs/PNG_STANDARD.md) ·
+[Português](docs/GUIA_RAPIDO_PT.md).
+
+~~~bash
+# 1) Explore instantly, no electronic-structure calculation
+python3 quick.py
+
+# 2) Get an explanatory recommendation without any optimization
+python USER_WORKFLOW/strategy_advisor.py --cif STRUCTURE.cif --reference BANDS.png   --goal direct --electronic semiconductor --bands auto
+
+# 3) Fit directly (requires separately installed YAeHMOP)
+python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini --pairs 1 --budget 400 --outdir outputs/source
+
+# 4) Apply that exact vector + K to ANOTHER system, without refitting
+python USER_WORKFLOW/frozen_transfer.py TARGET.cif TARGET.ini   --source-run outputs/source/run_summary.json --pairs 1 --outdir outputs/frozen
+
+# 5) Or optimize one shared vector with multiple training CIFs and held-out targets
+python USER_WORKFLOW/family_fit.py family.yaml --validate-only
+python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir outputs/family
+python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400 --outdir outputs/family
+~~~
+
+The last three physical operations require an authorized original YAeHMOP bind executable and atomic parameter table set with YAEHMOP_BIND / YAEHMOP_PARAM_FILE. The example paths are placeholders, not bundled reference bands. **Direct** sees the target in fitting; **frozen evaluation** does not change parameters; **family fitting** excludes a whole held-out target until after the shared fit. Only **gapped, nonmagnetic, spinless** references are supported by these simple commands. For metals or graphene Dirac crossings use specialized objectives and do not claim Fermi-surface accuracy from a 1D PNG.
+
 ## Quick start
 
 ```bash
@@ -53,7 +85,7 @@ python USER_WORKFLOW/bands_fit.py \
 
 **PNG pipeline:** [inspect → select visible curves → standardize to bands_N_layers.png → numerical CSV + QA](docs/FIT_YOUR_MATERIAL.md#2-inspect-the-png-and-prepare-the-band-reference-fast-no-solver). PNG/JPEG/TIFF/WebP and CSV are supported; user-reported image axes/paths must match the actual DFT reference. **--image** and **--png** are both valid aliases. Use **--pairs 2/3/4** only if the reference really contains 4/6/8 identifiable bands. Complete [flags](docs/CLI_REFERENCE.md).
 
-**Multi-material?** See [transferability guide](docs/SHARED_FITTING.md). The shared YAML prototype exists but does **not yet** expose the same turnkey 2/4/6/8-band PNG contract as this individual-material workflow. The carbon double-zeta patch is experimental. Ideal gapless graphene, metallic and SOC/spin-polarized references require other objectives.
+**Multi-material?** See [joint family fitting](docs/FAMILY_FIT.md) and [frozen-transfer evaluation](docs/START_HERE.md#4-option-b-frozen-transfer-no-refit). The family_fit.py wrapper standardizes each training material into the same 2/4/6/8-band target used by the physical shared optimizer, and reserves whole test materials until the vector is frozen. The older fit_shared.py expert prototype is separate and uses full-orbital tracing. The carbon double-zeta patch is experimental. Ideal gapless graphene, metallic and SOC/spin-polarized references require other objectives.
 
 ## Featured example: SnS₂ — paper Figure 4
 
