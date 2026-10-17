@@ -120,3 +120,32 @@ reg_weight = 0.04
 ```
 
 Relative paths in `image =` resolve relative to **the INI file's directory**, not the shell's current directory. For `dimension=2`, k nodes contain 2 coordinates each; for `dimension=3`, use 3. The reciprocal paths must match the reference data's ordering and units. Do not copy an arbitrary graphene path onto a diamond figure and assume physical correctness.
+
+
+## New user entrypoints: recommendation, frozen transfer, joint family fit
+
+**Advisor (no solver; not an automatic electronic classifier):**
+
+~~~bash
+python USER_WORKFLOW/strategy_advisor.py --cif material.cif --reference bands.png   --goal direct --electronic semiconductor --phase 1H --bands auto   --outdir outputs/advisor
+~~~
+
+Options: --cif required; --reference optional; --goal direct|transfer; --electronic semiconductor|metal|unknown; --phase unknown|1H|1T|bulk; --bands auto|2|4|6|8; --outdir. The user declares the physical labels, and the advisor explains suitable workflow commands. It does not fit or guarantee best parameters.
+
+**Frozen target evaluation (one native band calculation; ZERO optimizer calls):**
+
+~~~bash
+python USER_WORKFLOW/frozen_transfer.py TARGET.cif TARGET.ini   --source-run outputs/source/run_summary.json   --pairs 1 --outdir outputs/target_frozen
+~~~
+
+Alternative: --parameters PATH together with --k FLOAT. Mutually exclusive source modes. Optional --png/--image for target reference, --mode, --bbox, --colors, --allow-ambiguous (unsafe), --overlap-radius 1..8, --pairs 1..4 and --outdir. This command prepares target reference, reruns the physical solver once, computes the selected-window RMSE without parameter changes, writes transfer_report.json and full eigenbands. The source summary captures exact table and K and prevents evaluating the identical source CIF as a new target.
+
+**One shared vector trained on ≥2 CIFs with ≥1 reserved complete heldout material:**
+
+~~~bash
+python USER_WORKFLOW/family_fit.py family.yaml --validate-only
+python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir outputs/family
+python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400   --seed 20261014 --outdir outputs/family
+~~~
+
+Options: manifest YAML, --validate-only|--prepare-only|--fit (exactly one), --budget, --seed, --outdir. The manifest [template](../examples/transfer/family_template.yaml) has n_pairs and train/test entries with name, role, structure, settings, reference, mode, weight. Fit uses native selected-window multi-system backend. Test PNG/CSV is opened only after training coefficients are frozen. This implementation covers selected-band spinless, gapped systems, not metallic full-BZ fitting. See [family guide](FAMILY_FIT.md).

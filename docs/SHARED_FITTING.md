@@ -1,5 +1,8 @@
 # Transferability: one parameter vector, several materials
 
+> **2026-10-17 user-facing upgrade:** To fit a shared vector from multiple CIF+PNG/CSV training materials with exactly 2/4/6/8 matched bands and score whole held-out crystals **after freezing** use [FAMILY_FIT.md](FAMILY_FIT.md) and [family_fit.py](../USER_WORKFLOW/family_fit.py). For applying an existing source table to another target without optimization, use [frozen_transfer.py](../USER_WORKFLOW/frozen_transfer.py) and [START_HERE.md](START_HERE.md). The explanation of the older full-orbital fit_shared.py below remains accurate for that separate expert prototype.
+
+
 The single-material workflow is [CIF + PNG → EHT parameters → all bands](FIT_YOUR_MATERIAL.md). Transferability asks a *different* question: **can parameters fitted on some complete crystal structures predict the bands of another structure that was not used for fitting?**
 
 ## See the actual archived demonstrations immediately (NO solver)
@@ -20,7 +23,7 @@ These commands plot saved, physically calculated EHT results without downloading
 
 ## What works for a new material today?
 
-The **individual** CIF+PNG+INI interface documented in [Fit your material](FIT_YOUR_MATERIAL.md) is the tested public entry point for exactly 2/4/6/8 selected bands. A user can reproduce MoS2 or another supported **gapped nonmagnetic** crystal with their own CIF and actual band curves.
+The **individual** CIF+PNG+INI interface documented in [Fit your material](FIT_YOUR_MATERIAL.md) is the primary tested selected-band entrypoint. The current release also includes [family_fit.py](../USER_WORKFLOW/family_fit.py) for **joint 2/4/6/8-band shared optimization with test references withheld until the training vector is frozen**, and [frozen_transfer.py](../USER_WORKFLOW/frozen_transfer.py) to evaluate any existing supported native parameter table on another material with zero refitting. Both methods require real gapped spinless source bands and the user's authorized YAeHMOP executable.
 
 There is a separate expert prototype, **parameter_fitter/fit_shared.py**, that accepts a YAML file with a **systems** list, each entry giving a name, CIF, image, energy range and k path plus **role: train** or **role: test**. It uses original native YAeHMOP. Its actual syntax is:
 
@@ -52,6 +55,6 @@ For the original six Ge/Sn chalcogenides, direct selected-band RMSE averages are
 
 In a later carbon-only **pilot**, one shared five-variable carbon sp vector is fitted to PySCF/GTH-SZV PBE bands of graphene, T-graphene and net-C. Held-out phagraphene gives 0.1564 eV for **two frontier bands over just nine symmetry-path points**, with a *Gamma-only SCF reference*. It is **not** a converged 2D Dirac-cone validation, not universal carbon parameters, and not evidence for accurate 2D→3D diamond/graphite transfer. See [Best Results](BEST_RESULTS.md).
 
-## Planned public improvement
+## Remaining development
 
-A generic command such as **bandfit shared config.yaml --pairs 2 --holdout materialC** would be useful, but **this is a proposed interface, not an existing flag**. The key required development is to generalize the tested individual 2/4/6/8-band contract to multistructure fitting, verify source-provenance and branch ordering, and explicitly assess whole-material holdouts.
+The new family_fit.py wrapper now uses the selected-band multi-system physical backend and performs post-freeze withheld evaluation. It is not a universal environment-conditioned parameterizer and has not yet been independently benchmarked on new prospective materials beyond existing research cohorts. Remaining goals include a shared-data standards benchmark, metal-sensitive fitting with reliable BZ references, and automatic structure/PDF/PNG classification with quality uncertainties. [Start here](START_HERE.md).

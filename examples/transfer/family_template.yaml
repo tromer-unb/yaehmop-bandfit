@@ -1,0 +1,33 @@
+# COPY to my_family/family.yaml, then replace ALL dummy paths below.
+# This is a template, NOT a bundled DFT/reference dataset.
+# Each reference must be a true gapped, spinless N-band DFT image/CSV.
+# Correct energy axis and reciprocal k path live in each SETTINGS.ini.
+# All training materials share one native EHT parameter vector and K.
+# A whole target material is TEST-only; its reference is not opened until
+# the training vector is frozen.
+n_pairs: 1     # 1=2 bands, 2=4, 3=6, 4=8
+gap_weight: 0.35
+reg_weight: 0.04
+systems:
+  - name: train_A
+    role: train
+    structure: train_A/structure.cif
+    settings: train_A/file.ini
+    reference: train_A/bands.png
+    mode: auto
+    weight: 1.0
+
+  - name: train_B
+    role: train
+    structure: train_B/structure.cif
+    settings: train_B/file.ini
+    reference: train_B/bands.png
+    mode: auto
+    weight: 1.0
+
+  - name: test_C
+    role: test
+    structure: test_C/structure.cif
+    settings: test_C/file.ini
+    reference: test_C/bands.png
+    mode: auto
