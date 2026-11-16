@@ -180,7 +180,7 @@ If your only source is an unreadable image, [manual band digitization](IMAGE_INP
 | --from-fit | --from-fit path/fit.json | Re-run solver from saved fit and K |
 | --from-parameters | --from-parameters params.dat | Run solver using supplied native table |
 | --k | --k 1.75 | Required with --from-parameters |
-| --overlap-radius | --overlap-radius 5 | Neighbor-image radius in *recomputation* |
+| --overlap-radius | --overlap-radius 5 | Neighbor-image radius in fitting *and* recomputation (default 5) |
 | --seed | --seed 42 | Deterministic optimizer initialization |
 | --outdir | --outdir outputs/test | Result directory |
 

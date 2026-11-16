@@ -7,6 +7,20 @@ import numpy as np
 
 HERE=Path(__file__).resolve().parent
 
+# Periodic images per ACTIVE lattice direction, shared by fitting and
+# recomputation so that the fitted and the recomputed Hamiltonians match.
+# 5 converges carbon test bands to ~1e-5 eV (4 leaves ~1e-3 eV errors).
+DEFAULT_OVERLAP_RADIUS=5
+
+def overlap_images_for(periodic_dim,radius=DEFAULT_OVERLAP_RADIUS):
+    """Overlap images (a,b,c): `radius` along active directions, 0 elsewhere."""
+    periodic_dim=int(periodic_dim); radius=int(radius)
+    if periodic_dim not in (1,2,3):
+        raise ValueError("periodic_dim must be 1, 2, or 3")
+    if not 1<=radius<=8:
+        raise ValueError("overlap radius must be in 1..8")
+    return tuple(radius if j<periodic_dim else 0 for j in range(3))
+
 @dataclass(frozen=True)
 class BandPath:
     labels: tuple[str, ...]

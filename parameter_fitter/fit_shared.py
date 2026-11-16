@@ -17,7 +17,7 @@ from yaehmop_generic import (
     BandPath, normalized_path_coordinate, orbital_count, parse_band,
     parse_parameter_table, resolve_yaehmop_assets, run_bind,
     subset_for_elements, valence_electrons, write_parameter_file,
-    write_periodic_input_generic,
+    write_periodic_input_generic, DEFAULT_OVERLAP_RADIUS, overlap_images_for,
 )
 
 
@@ -95,6 +95,9 @@ def prepare_system(entry, base, defaults, shared):
         raise ValueError(f"{name}: invalid basis/electron count")
 
     point_dim = int(entry.get("point_dim", 2))
+    overlap_images = overlap_images_for(
+        point_dim, int(entry.get("overlap_radius",
+                                 shared.get("overlap_radius", DEFAULT_OVERLAP_RADIUS))))
     flat = [v for p in entry["symmetry_points"] for v in p]
     points = parse_points(flat, point_dim)
     labels = tuple(str(v) for v in entry["labels"])
@@ -137,6 +140,7 @@ def prepare_system(entry, base, defaults, shared):
             "image": image, "atoms": atoms, "symbols": symbols,
             "elements": elements, "norb": norb, "nelec": nelec,
             "nocc": nocc, "path": path, "xcoord": xcoord, "T": T,
+            "periodic_dim": point_dim, "overlap_images": overlap_images,
             "W": W, "mask": mask, "target_gap": target_gap,
             "target_mid": target_mid, "fit_window": fit_window,
             "trace_seed_x": float(xtrace[seedidx]), "trace_counts": counts}
@@ -244,7 +248,9 @@ def main():
         inp = swork / f"{suffix}.bind"
         log = swork / f"{suffix}.log"
         write_parameter_file(parm, ps)
-        write_periodic_input_generic(system["cif"], inp, system["path"], K, True, system["nelec"])
+        write_periodic_input_generic(system["cif"], inp, system["path"], K, True, system["nelec"],
+                                     overlap_images=system["overlap_images"],
+                                     periodic_dim=system["periodic_dim"])
         run_bind(BIND, inp, parm, log)
         _, model = parse_band(str(inp) + ".band")
         if model.shape != system["T"].shape or not np.isfinite(model).all():

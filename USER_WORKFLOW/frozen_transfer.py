@@ -13,7 +13,8 @@ from ase.io import read
 from bands_fit import conf,read_nodes,csv_path,recompute,write_bands_plot
 from prepare_band_png import prepare,parse_bbox
 from generate_mc2d_multiband import read_colored_png
-from yaehmop_generic import parse_parameter_table,subset_for_elements,orbital_count,valence_electrons
+from yaehmop_generic import (parse_parameter_table,subset_for_elements,orbital_count,
+    valence_electrons,DEFAULT_OVERLAP_RADIUS)
 
 def sha(p:Path)->str:
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -33,7 +34,7 @@ def source_from_summary(path:Path)->tuple[Path,float,dict]:
 
 def evaluate(cif,ini,image,parameters,K,outdir,pairs,
              *,mode=None,bbox=None,colors=None,allow_ambiguous=False,
-             overlap_radius=4,source=None):
+             overlap_radius=DEFAULT_OVERLAP_RADIUS,source=None):
     cif=Path(cif).resolve();ini=Path(ini).resolve();outdir=Path(outdir).resolve()
     if pairs not in (1,2,3,4):raise ValueError('pairs must be 1, 2, 3 or 4')
     if not cif.is_file():raise FileNotFoundError(cif)
@@ -129,7 +130,8 @@ def main():
     p.add_argument('--bbox',help='L,T,R,B of real plot frame')
     p.add_argument('--colors',help='ordered actual color values for exactly 2*--pairs bands')
     p.add_argument('--allow-ambiguous',action='store_true')
-    p.add_argument('--overlap-radius',type=int,default=4)
+    p.add_argument('--overlap-radius',type=int,default=None,
+        help=f'Images per active lattice direction (default: source run value, else {DEFAULT_OVERLAP_RADIUS})')
     p.add_argument('--outdir',type=Path,default=Path('outputs/frozen_transfer'))
     args=p.parse_args()
     if args.source_run is not None:
@@ -139,10 +141,13 @@ def main():
         if args.k is None:p.error('--k is required when using --parameters')
         params,K,source=args.parameters,args.k,None
     pairs=args.pairs or int(conf(args.input_file)['fit'].get('n_pairs','1'))
+    radius=args.overlap_radius
+    if radius is None:
+        radius=int((source or {}).get('overlap_radius',DEFAULT_OVERLAP_RADIUS))
     evaluate(args.cif,args.input_file,args.png,params,K,args.outdir,pairs,
         mode=args.mode,bbox=args.bbox,colors=args.colors,
         allow_ambiguous=args.allow_ambiguous,
-        overlap_radius=args.overlap_radius,source=source)
+        overlap_radius=radius,source=source)
 
 if __name__=='__main__':
     main()

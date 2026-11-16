@@ -22,7 +22,8 @@ sys.path[:0]=[str(ROOT/"parameter_fitter"),str(ROOT/"source"),str(HERE)]
 from prepare_band_png import prepare,parse_bbox
 from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
    subset_for_elements,valence_electrons,orbital_count,BandPath,
-   write_periodic_input_generic,run_bind,parse_band,normalized_path_coordinate)
+   write_periodic_input_generic,run_bind,parse_band,normalized_path_coordinate,
+   DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from fit_from_image import parse_points
 
 def csv_path(x,base):
@@ -110,7 +111,7 @@ def plot_full(k,E,out,*,name,nocc,emin=-6,emax=6):
           "note":"PNG/PDF only show the near-gap region; CSV/NPZ preserve all physical eigenvalues."}
     (out/"bands_full_plot_info.json").write_text(json.dumps(meta,indent=2)+"\n")
 
-def recompute(cif,config,parameters,K,outdir,overlap_radius=4):
+def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADIUS):
     """Recompute physical YAeHMOP eigenbands WITHOUT using any target pixels."""
     bind,_=resolve_yaehmop_assets()
     p=parse_parameter_table(parameters)
@@ -127,7 +128,7 @@ def recompute(cif,config,parameters,K,outdir,overlap_radius=4):
     outdir=Path(outdir);outdir.mkdir(parents=True,exist_ok=True)
     inp=outdir/"recompute.bind"
     logfile=outdir/"recompute.log"
-    overlap=tuple(int(overlap_radius) if j<dim else 0 for j in range(3))
+    overlap=overlap_images_for(dim,overlap_radius)
     write_periodic_input_generic(cif,inp,bandpath,float(K),True,nelec,
                                  overlap_images=overlap,periodic_dim=dim)
     run_bind(bind,inp,parameters,logfile)
@@ -172,8 +173,9 @@ def main():
     parser.add_argument("--from-parameters",type=Path,
                         help="Recompute full physical bands from original-YAeHMOP parameter table")
     parser.add_argument("--k",type=float,help="Required with --from-parameters")
-    parser.add_argument("--overlap-radius",type=int,default=4,
-                        help="Number of overlap images in each active lattice direction when recomputing physical bands (default: 4)")
+    parser.add_argument("--overlap-radius",type=int,default=None,
+                        help="Overlap images in each active lattice direction, used by BOTH fitting and recomputation "
+                             f"(default: [fit] overlap_radius, else {DEFAULT_OVERLAP_RADIUS}; --from-fit reuses the fit's value)")
     parser.add_argument("--optimizer",choices=("nelder-mead","simulated-annealing",
                         "sa-nelder-mead","hooke-jeeves"),default=None)
     parser.add_argument("--seed",type=int,default=20261014)
@@ -187,11 +189,21 @@ def main():
     pairs=int(args.pairs or fit.get("n_pairs","1"))
     if pairs not in (1,2,3,4):parser.error("n_pairs must be 1,2,3,4")
     outdir=args.outdir.resolve();outdir.mkdir(parents=True,exist_ok=True)
-    if args.overlap_radius not in range(1,9):
+    radius=args.overlap_radius
+    if radius is None and not args.from_fit:
+        radius=fit.getint("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS)
+    if radius is not None and radius not in range(1,9):
         parser.error("--overlap-radius must be in [1,8]")
     if args.from_fit:
         source=args.from_fit.resolve()
         status=json.loads(source.read_text())
+        if "lattice" not in status:
+            print("WARNING: fit.json predates the periodicity fix; it was optimized with a 2D "
+                  "Lattice (5,5,0) regardless of [band_path] dimension."+
+                  (" This 3D recomputation will NOT reproduce that fit; refit."
+                   if dim==3 else ""),file=sys.stderr)
+        if radius is None:
+            radius=int(status.get("overlap_radius",DEFAULT_OVERLAP_RADIUS))
         saved_K=float(status["best_x"]["GLOBAL__K"])
         native=source.parent/"param_best_native.dat"
         if not native.is_file():raise FileNotFoundError(native)
@@ -201,11 +213,11 @@ def main():
             record=next(iter(files.values()))
             if record["cif"]!=hashlib.sha256(cif.read_bytes()).hexdigest():
                 raise ValueError("CIF SHA256 differs from original fit; refusing silent substitution")
-        recompute(cif,config,native,saved_K,outdir,args.overlap_radius)
+        recompute(cif,config,native,saved_K,outdir,radius)
         return
     if args.from_parameters:
         if args.k is None:parser.error("--k is required with --from-parameters")
-        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,args.overlap_radius)
+        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,radius)
         return
     image=args.png
     if image is None:
@@ -253,6 +265,7 @@ def main():
     if not name or any(c in name for c in ("/","\\","..")):
         raise ValueError("Material name must not contain slash or '..'")
     yml={"n_pairs":pairs,"points_per_line":step,"trace_nx":nx,
+         "overlap_radius":int(radius),
          "image_mode":"colored",
          "gap_weight":float(fit.get("gap_weight",".35")),
          "reg_weight":float(fit.get("reg_weight",".04")),
@@ -303,7 +316,8 @@ def main():
         "initialization_calls":base_calls,"refinement_calls":refinement_calls,
         "requested_total_budget":budget,"optimizer_choice":optimizer,
         "selected_rmse_eV":met["selected_rmse_eV"],"gap_error_eV":met["gap_error_eV"],
-        "K_EHT":state["best_x"]["GLOBAL__K"],"native_parameters":str(outdir/"fit/param_best_native.dat"),
+        "K_EHT":state["best_x"]["GLOBAL__K"],
+        "periodic_dim":dim,"overlap_radius":int(radius),"native_parameters":str(outdir/"fit/param_best_native.dat"),
         "figure":str(outdir/"bands_comparison.png"),
         "note":"Physical YAeHMOP calculations; trained only N=2*n_pairs frontier bands"}
     (outdir/"run_summary.json").write_text(json.dumps(status,indent=2)+"\n")

@@ -22,7 +22,8 @@ from generate_mc2d_multiband import read_colored_png
 from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
  subset_for_elements,orbital_count,valence_electrons,
  BandPath,normalized_path_coordinate,write_parameter_file,
- write_periodic_input_generic,run_bind,parse_band)
+ write_periodic_input_generic,run_bind,parse_band,
+ DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from p3_objectives import bounded_nelder_mead,hooke_jeeves
 from simulated_annealing import simulated_annealing
 from hybrid_sa_nm import hybrid_sa_nelder_mead
@@ -43,6 +44,10 @@ def parse_sample(e,root,defaults,shared):
         raise ValueError(f"{e['name']} requires {n_pairs} conduction/valence orbitals; EHT only has {norb-nocc} conduction")
 
     dim=int(e.get("point_dim",2))
+    # The k-point dimension IS the lattice periodicity: a 3D crystal must
+    # be written as Lattice 3, not as a one-cell-thick 2D slab.
+    radius=int(e.get("overlap_radius",shared.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)))
+    images=overlap_images_for(dim,radius)
     nodes=parse_points([x for node in e["symmetry_points"] for x in node],dim)
     labels=tuple(e["labels"])
     n=int(e.get("points_per_line",shared.get("points_per_line",10)))
@@ -73,8 +78,14 @@ def parse_sample(e,root,defaults,shared):
     return dict(name=e["name"],cif=cif,png=png,symbols=syms,
       elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=nocc,
       path=path,kx=kx,target=target,n_pairs=n_pairs,gap=tc-tv,weight=float(e.get("weight",1.)),
+      periodic_dim=dim,overlap_images=images,
       png_hash=hashlib.sha256(png.read_bytes()).hexdigest(),
       cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
+
+def write_sample_input(s,inp,k):
+    """Native periodic input for one sample, honouring its dimensionality."""
+    return write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"],
+        overlap_images=s["overlap_images"],periodic_dim=s["periodic_dim"])
 
 def scores(bands,s):
     n=s["nocc"]
@@ -131,7 +142,7 @@ class Fitter:
         w=self.work/s["name"];w.mkdir(exist_ok=True)
         native=w/(tag+".parms");inp=w/(tag+".bind");log=w/(tag+".log")
         write_parameter_file(native,{a:params[a] for a in s["elements"]})
-        write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"])
+        write_sample_input(s,inp,k)
         run_bind(self.bind,inp,native,log)
         _,bands=parse_band(str(inp)+".band")
         for tmp in w.glob(tag+"*"):
@@ -304,7 +315,11 @@ def main():
                           result.get("nm_stage_evaluations")] if args.optimizer=="sa-nelder-mead" and
                             args.initialization=="existing" else None,
       objective_weights={"rmse_selected":1.,"gapMAE":f.gap_w,"param_reg":f.reg_w},
-      metrics=met,n_params=len(f.names))
+      metrics=met,n_params=len(f.names),
+      overlap_radius=int(config.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)),
+      lattice={s["name"]:dict(periodic_dim=s["periodic_dim"],
+                              overlap_images=list(s["overlap_images"]))
+               for s in f.train})
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

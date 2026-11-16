@@ -9,7 +9,8 @@ from ase.io import read
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from yaehmop_generic import (parse_parameter_table,subset_for_elements,orbital_count,valence_electrons,
-    write_parameter_file,write_periodic_input_generic,BandPath,run_bind,parse_band,normalized_path_coordinate,resolve_yaehmop_assets)
+    write_parameter_file,write_periodic_input_generic,BandPath,run_bind,parse_band,normalized_path_coordinate,resolve_yaehmop_assets,
+    DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from image_target import load_band_image,energies_at_x,image_gap
 
 
@@ -70,7 +71,8 @@ def main():
     ap=argparse.ArgumentParser(description='Generic YAeHMOP parameter fitting from a band-structure image.')
     ap.add_argument('cif'); ap.add_argument('image')
     ap.add_argument('--emin',type=float,required=True); ap.add_argument('--emax',type=float,required=True); ap.add_argument('--fermi',type=float,default=0.0)
-    ap.add_argument('--symmetry-points','--symetry-points',dest='symmetry_points',type=float,nargs='+',required=True); ap.add_argument('--point-dim',type=int,choices=(1,2,3),default=2)
+    ap.add_argument('--symmetry-points','--symetry-points',dest='symmetry_points',type=float,nargs='+',required=True); ap.add_argument('--point-dim',type=int,choices=(1,2,3),default=2,help='k-point AND lattice periodicity (3 for bulk crystals)')
+    ap.add_argument('--overlap-radius',type=int,default=DEFAULT_OVERLAP_RADIUS)
     ap.add_argument('--labels',nargs='+',required=True); ap.add_argument('--points-per-line',type=int,default=30)
     ap.add_argument('--maxiter',type=int,default=6); ap.add_argument('--popsize',type=int,default=5); ap.add_argument('--local-maxiter',type=int,default=160)
     ap.add_argument('--seed',type=int,default=20260927); ap.add_argument('--gap-weight',type=float,default=2.0); ap.add_argument('--reg-weight',type=float,default=.025)
@@ -83,6 +85,7 @@ def main():
     points=parse_points(args.symmetry_points,args.point_dim)
     if len(points)!=len(args.labels): raise ValueError('labels and symmetry points count differ')
     path=BandPath(tuple(args.labels),points,args.points_per_line); target=load_band_image(image,args.emin,args.emax); tv,tc,tgap=image_gap(target,fermi=args.fermi); tmid=.5*(tv+tc)
+    images=overlap_images_for(args.point_dim,args.overlap_radius)
     specs,x0,bounds,scales=build_specs(defaults,elements); names=[f'{a}_{b}_{c}'.strip('_') for a,b,c in specs]
     inp=work/f'{args.tag}.bind'; parm=work/f'{args.tag}.parms'; runlog=work/f'{args.tag}.run.log'; history=[]; neval=0; best=[1e99,None,None]
     # x coordinate depends only on the requested path/cell.
@@ -94,7 +97,7 @@ def main():
         nonlocal neval,best; neval+=1; p,K=apply_x(defaults,specs,x)
         if not physical_ok(p): return 100.0
         try:
-            write_parameter_file(parm,p); write_periodic_input_generic(cif,inp,path,K,True,nelec); run_bind(BIND,inp,parm,runlog); _,M=parse_band(str(inp)+'.band')
+            write_parameter_file(parm,p); write_periodic_input_generic(cif,inp,path,K,True,nelec,overlap_images=images,periodic_dim=args.point_dim); run_bind(BIND,inp,parm,runlog); _,M=parse_band(str(inp)+'.band')
             if M.shape!=(len(xcoord),norb) or not np.isfinite(M).all(): return 100.0
             mv=float(M[:,nocc-1].max()); mc=float(M[:,nocc].min()); mgap=mc-mv; mmid=.5*(mv+mc); shift=tmid-mmid; A=M+shift
             r_mt,r_tm=image_shape_metrics(target,xcoord,A); gaperr=mgap-tgap; reg=float(np.sqrt(np.mean(((np.asarray(x)-x0)/scales)**2)))

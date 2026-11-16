@@ -28,7 +28,7 @@ python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini [options]
 | `--from-fit path/to/fit.json` | **Runs solver**: load a saved fit's native parameter file and stored K, verify CIF SHA, regenerate all physical orbitals and plot. |
 | `--from-parameters PATH` | **Runs solver**: compute full original YAeHMOP bands with YOUR table; skips image fitting. |
 | `--k FLOAT` | Wolfsberg–Helmholtz constant, required with `--from-parameters`. |
-| `--overlap-radius INT` | Number of images for **each active lattice direction** in recomputation, default `4`, allowed 1–8. Not a training-stage convergence guarantee. |
+| `--overlap-radius INT` | Number of images for **each active lattice direction**, used by **both fitting and recomputation**, allowed 1–8. Default: `[fit] overlap_radius` in the INI, else `5`; `--from-fit` reuses the value stored in `fit.json`. The lattice dimension always follows `[band_path] dimension` (use `3` for bulk crystals). |
 
 **Optimizer naming:** `nelder-mead` chooses the original staged YAeHMOP differential-evolution initializer followed by bounded Nelder–Mead. Other options run that stage plus a refinement; the total is split and `--budget` is a requested number of objective calls, not a wall-time limit. Results may vary by system. **Never run fitting during CI**.
 
@@ -92,7 +92,7 @@ Options: `csv` (required), `--out` (required), `--orbitals frontier|all|1,2,...`
 
 ## Local crystal recomputation: `scripts/recompute_carbon.py`
 
-`--system graphene|diamond|graphite`, `--parameters PATH` (required), `--k FLOAT` (default 1.75), `--overlap-radius INT` (default 4), `--outdir DIR`. Requires the user's external `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` and explicitly **runs** physical band calculation. Does not optimize a fit.
+`--system graphene|diamond|graphite`, `--parameters PATH` (required), `--k FLOAT` (default 1.75), `--overlap-radius INT` (default 5), `--outdir DIR`. Requires the user's external `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` and explicitly **runs** physical band calculation. Does not optimize a fit.
 
 ## INI settings reference
 

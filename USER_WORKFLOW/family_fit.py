@@ -14,6 +14,8 @@ from bands_fit import conf,read_nodes,csv_path
 from prepare_band_png import prepare,parse_bbox
 from frozen_transfer import evaluate,sha
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'parameter_fitter'))
+from yaehmop_generic import DEFAULT_OVERLAP_RADIUS
 
 def load_manifest(path):
     path=Path(path).resolve()
@@ -109,7 +111,8 @@ def main():
         print(json.dumps(report,indent=2))
         return
     out.mkdir(exist_ok=True,parents=True)
-    training_config={'n_pairs':pairs,
+    radius=int(m.get('overlap_radius',DEFAULT_OVERLAP_RADIUS))
+    training_config={'n_pairs':pairs,'overlap_radius':radius,
         'gap_weight':float(m.get('gap_weight',.35)),
         'reg_weight':float(m.get('reg_weight',.04)),
         'systems':[preparation(s,out,pairs) for s in train]}
@@ -142,7 +145,7 @@ def main():
     K=float(saved['best_x']['GLOBAL__K'])
     frozen={'native_parameters':str(native),'K_EHT':K,
         'train_cif_sha256s':list(report['training_cif_sha256s'].values()),
-        'train_systems':report['training']}
+        'train_systems':report['training'],'overlap_radius':radius}
     (out/'shared_frozen_source.json').write_text(json.dumps(frozen,indent=2)+'\n')
     results={}
     # Only now open each heldout reference and score the *frozen* vector.
@@ -150,7 +153,7 @@ def main():
         results[s['name']]=evaluate(s['cif'],s['ini'],s['image'],
             native,K,out/'heldout'/s['name'],pairs,
             mode=s['image_mode'],bbox=s['bbox'],colors=s['colors'],
-            source=frozen)
+            overlap_radius=radius,source=frozen)
     report.update({'parameters_sha256':sha(native),'K_EHT':K,
         'shared_source_summary':str(out/'shared_frozen_source.json'),
         'test_references_opened_only_after_fit':True,
