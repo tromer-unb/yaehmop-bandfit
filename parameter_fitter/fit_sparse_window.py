@@ -8,6 +8,9 @@ the FULL original Hamiltonian for each real parameter candidate.
 
 Staged initializer: original YAeHMOP DE -> bounded Nelder-Mead.
 Optional equal-budget refinements: NM, SA, SA+NM, Hooke-Jeeves.
+Global searches from the stock parameters (ported from dftb_sk_gen):
+full DE, Bayesian optimization, CMA-ES, genetic algorithm, Powell, each
+with an optional local polish (Nelder-Mead or Powell) inside the budget.
 """
 from pathlib import Path
 import argparse,csv,json,hashlib,sys
@@ -27,6 +30,7 @@ from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
 from p3_objectives import bounded_nelder_mead,hooke_jeeves
 from simulated_annealing import simulated_annealing
 from hybrid_sa_nm import hybrid_sa_nelder_mead
+from global_optimizers import run_global,GLOBAL_METHODS,POLISH_METHODS
 
 def parse_sample(e,root,defaults,shared):
     cif=(root/e["structure"]).resolve()
@@ -224,7 +228,13 @@ def main():
     p.add_argument("--initialization",choices=("staged","existing","transferred"),default="staged")
     p.add_argument("--start-json")
     p.add_argument("--optimizer",choices=("nelder-mead","simulated-annealing",
-                   "sa-nelder-mead","hooke-jeeves"),default="nelder-mead")
+                   "sa-nelder-mead","hooke-jeeves")+GLOBAL_METHODS,default="nelder-mead",
+                   help="staged: nelder-mead = short DE + NM; a global method runs from the stock "
+                        "parameters with the whole budget. existing/transferred: refinement method")
+    p.add_argument("--polish",choices=POLISH_METHODS,default=None,
+                   help="local refinement after a global method, inside the same budget")
+    p.add_argument("--polish-fraction",type=float,default=.25,
+                   help="share of the budget given to --polish (default 0.25)")
     p.add_argument("--budget",type=int,default=300)
     p.add_argument("--n-pairs",type=int,choices=(1,2,3,4),default=None,
                    help="Override YAML; number of VB and CB bands each")
@@ -240,12 +250,22 @@ def main():
         p.error("n_pairs must be 1, 2, 3 or 4")
     names=[e["name"] for e in config["systems"] if e.get("role","train")=="train"]
     tests=[e["name"] for e in config["systems"] if e.get("role")=="test"]
+    if args.polish and args.optimizer not in GLOBAL_METHODS:
+        p.error("--polish is only used with "+", ".join(GLOBAL_METHODS))
+    if not 0<args.polish_fraction<1:
+        p.error("--polish-fraction must be between 0 and 1")
     if args.validate_only:
         print(json.dumps(dict(train=names,test=tests,test_files_opened=False)))
         return
     out=Path(args.outdir).resolve();out.mkdir(exist_ok=True,parents=True)
     f=Fitter(config,cfgfile.parent,out)
-    if args.initialization=="staged":
+    if args.initialization=="staged" and args.optimizer in GLOBAL_METHODS:
+        result=run_global(args.optimizer,f.objective,f.stock,f.bounds,args.budget,
+                          seed=args.seed,polish_method=args.polish,
+                          polish_fraction=args.polish_fraction)
+        x=result["best_x"] if result["best_x"] is not None else f.stock
+        start_meta=None
+    elif args.initialization=="staged":
         result=base_fit(f,args.budget,args.seed)
         x=result["best_x"]
         start_meta=None
@@ -282,8 +302,13 @@ def main():
         kw={"budget":args.budget}
         if args.optimizer in ("simulated-annealing","sa-nelder-mead"):
             kw["seed"]=args.seed
-        result=options[args.optimizer](f.objective,x0,f.bounds,**kw)
-        result["optimizer"]=args.optimizer
+        if args.optimizer in GLOBAL_METHODS:
+            result=run_global(args.optimizer,f.objective,x0,f.bounds,args.budget,
+                              seed=args.seed,polish_method=args.polish,
+                              polish_fraction=args.polish_fraction)
+        else:
+            result=options[args.optimizer](f.objective,x0,f.bounds,**kw)
+            result["optimizer"]=args.optimizer
         # Freeze at global best TRAINING objective found in either stage;
         # do not use the heldout reference to choose this vector.
         compare_loss=(baseline_loss if baseline_loss is not None else
@@ -296,7 +321,8 @@ def main():
       image_mode=config.get("image_mode","auto"),initializer=args.initialization,
       adaptation_prior_material_was_heldout=(
            args.initialization=="transferred"),
-      optimizer=result["optimizer"],train_systems=names,test_systems=tests,
+      optimizer=result["optimizer"],optimizer_message=result.get("message"),
+      polish=result.get("polish"),train_systems=names,test_systems=tests,
       test_evaluated=not args.skip_test_eval,budget=args.budget,
       objective_evaluations=result["evaluations"],seed=args.seed,
       best_training_loss=float(result["best_loss"] if args.initialization=="staged"

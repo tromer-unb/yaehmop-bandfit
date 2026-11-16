@@ -25,6 +25,7 @@ from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
    write_periodic_input_generic,run_bind,parse_band,normalized_path_coordinate,
    DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from fit_from_image import parse_points
+from global_optimizers import GLOBAL_METHODS,POLISH_METHODS
 
 def csv_path(x,base):
     p=Path(os.path.expandvars(os.path.expanduser(x)))
@@ -177,7 +178,12 @@ def main():
                         help="Overlap images in each active lattice direction, used by BOTH fitting and recomputation "
                              f"(default: [fit] overlap_radius, else {DEFAULT_OVERLAP_RADIUS}; --from-fit reuses the fit's value)")
     parser.add_argument("--optimizer",choices=("nelder-mead","simulated-annealing",
-                        "sa-nelder-mead","hooke-jeeves"),default=None)
+                        "sa-nelder-mead","hooke-jeeves")+GLOBAL_METHODS,default=None,
+                        help="nelder-mead (default) = short DE + NM; SA/HJ = 60%% DE+NM then refinement; "
+                             "differential-evolution/bayesian/cmaes/genetic/powell = one global search "
+                             "from the stock parameters with the whole budget")
+    parser.add_argument("--polish",choices=POLISH_METHODS,default=None,
+                        help="local refinement after a global optimizer (25%% of the budget)")
     parser.add_argument("--seed",type=int,default=20261014)
     args=parser.parse_args()
     cif=args.cif.resolve()
@@ -236,6 +242,12 @@ def main():
     coverage=ref.getfloat("min_coverage",fallback=.75)
     budget=int(args.budget or fit.get("budget","200"))
     optimizer=args.optimizer or fit.get("optimizer","nelder-mead")
+    polish=args.polish or fit.get("polish",fallback=None) or None
+    valid=("nelder-mead","simulated-annealing","sa-nelder-mead","hooke-jeeves")+GLOBAL_METHODS
+    if optimizer not in valid:
+        parser.error("optimizer must be one of: "+", ".join(valid))
+    if polish and (optimizer not in GLOBAL_METHODS or polish not in POLISH_METHODS):
+        parser.error("polish (nelder-mead or powell) only follows "+", ".join(GLOBAL_METHODS))
     if budget<80 and not args.validate_only and not args.prepare_only:
         parser.error("Staged fit requires at least 80 YAeHMOP objective evaluations")
     if args.validate_only:
@@ -279,7 +291,15 @@ def main():
     target=outdir/"fit_input.yaml"
     target.write_text(yaml.safe_dump(yml,sort_keys=False))
     core=[sys.executable,str(ROOT/"parameter_fitter/fit_sparse_window.py"),str(target)]
-    if optimizer=="nelder-mead":
+    if optimizer in GLOBAL_METHODS:
+        # One global search from the stock parameters with the WHOLE budget.
+        base_calls=budget
+        refinement_calls=0
+        cmd=core+["--outdir",str(outdir/"fit"),"--initialization","staged",
+                  "--optimizer",optimizer,"--budget",str(budget),"--seed",str(args.seed)]
+        if polish:cmd+=["--polish",polish]
+        subprocess.run(cmd,check=True,text=True)
+    elif optimizer=="nelder-mead":
         # P5 staged mode is original YAeHMOP DE followed by bounded NM.
         base_calls=budget
         refinement_calls=0
@@ -314,7 +334,7 @@ def main():
         "extraction":qa,"n_pairs":pairs,"n_scored_bands":2*pairs,
         "optimizer_evaluations":state["objective_evaluations"],
         "initialization_calls":base_calls,"refinement_calls":refinement_calls,
-        "requested_total_budget":budget,"optimizer_choice":optimizer,
+        "requested_total_budget":budget,"optimizer_choice":optimizer,"polish":polish,
         "selected_rmse_eV":met["selected_rmse_eV"],"gap_error_eV":met["gap_error_eV"],
         "K_EHT":state["best_x"]["GLOBAL__K"],
         "periodic_dim":dim,"overlap_radius":int(radius),"native_parameters":str(outdir/"fit/param_best_native.dat"),

@@ -94,6 +94,11 @@ def main():
     mode.add_argument('--fit',action='store_true',help='actual native family optimization and frozen held-out evaluation')
     p.add_argument('--budget',type=int,default=400)
     p.add_argument('--seed',type=int,default=20261014)
+    p.add_argument('--optimizer',default='nelder-mead',
+       choices=('nelder-mead','differential-evolution','bayesian','cmaes','genetic','powell'),
+       help='nelder-mead = short DE + NM (default); otherwise one global search from the stock parameters')
+    p.add_argument('--polish',choices=('nelder-mead','powell'),
+       help='local refinement after a global optimizer, inside the budget')
     p.add_argument('--outdir',type=Path,default=Path('outputs/family_fit'))
     args=p.parse_args()
     path,m,train,test=load_manifest(args.manifest)
@@ -130,13 +135,16 @@ def main():
     from fit_sparse_window import Fitter
     probe=Fitter(training_config,generated.parent,out/'fit')
     minbudget=minimum_staged_budget(len(probe.names))
-    if args.budget<minbudget:
+    if args.optimizer=='nelder-mead' and args.budget<minbudget:
         p.error(f'This family has {len(probe.names)} active EHT parameters; '
                 f'--budget must be >= {minbudget} for the staged initializer. '
                 'A larger budget (e.g. 400) is recommended for actual science.')
     cmd=[sys.executable,str(ROOT/'parameter_fitter/fit_sparse_window.py'),
          str(generated),'--outdir',str(out/'fit'),'--initialization','staged',
-         '--budget',str(args.budget),'--seed',str(args.seed)]
+         '--budget',str(args.budget),'--seed',str(args.seed),'--optimizer',args.optimizer]
+    if args.polish:
+        if args.optimizer=='nelder-mead':p.error('--polish only follows a global optimizer')
+        cmd+=['--polish',args.polish]
     print('FITTING_ONE_SHARED_PARAMETER_VECTOR_TRAIN_ONLY',flush=True)
     subprocess.run(cmd,check=True)
     saved=json.loads((out/'fit/fit.json').read_text())

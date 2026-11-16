@@ -171,7 +171,7 @@ If your only source is an unreadable image, [manual band digitization](IMAGE_INP
 | --image / --png | --png bands.png | Override reference source (same option) |
 | --pairs | --pairs 2 | 2 V + 2 C = 4 selected bands |
 | --budget | --budget 400 | Requested local physical YAeHMOP evaluations |
-| --optimizer | --optimizer nelder-mead | Staged differential evolution + local refinement |
+| --optimizer | --optimizer nelder-mead | Default: staged differential evolution + local refinement. Also differential-evolution, bayesian, cmaes, genetic, powell, simulated-annealing, sa-nelder-mead, hooke-jeeves ([details](CLI_REFERENCE.md#optimizers)) |
 | --mode | --mode colors | Decode auto, colors, mono, layered or csv |
 | --bbox | --bbox 100,80,920,650 | Pixel rectangle inside figure axes |
 | --colors | --colors '#c82d37,#1c7ad5' | True per-band curve colors |

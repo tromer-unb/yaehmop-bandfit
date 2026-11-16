@@ -23,7 +23,8 @@ python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini [options]
 | `--validate-only` | **Fast**: check CIF/config and decode the image or CSV, record raster QA; **no band extraction and no YAeHMOP**. |
 | `--prepare-only` | **Fast**: decode, extract, encode PNG bitplanes, preview and QA; **no YAeHMOP**. |
 | `--budget N` | Requested physical solver objective evaluations. Only used when actually fitting. Staged fitting requires at least 80; SA refinements require >=160. |
-| `--optimizer {nelder-mead,simulated-annealing,sa-nelder-mead,hooke-jeeves}` | Select staged base (physical original YAeHMOP) and optional refinement. See note below. |
+| `--optimizer NAME` | Fitting algorithm (also `optimizer =` in `[fit]`). See [Optimizers](#optimizers) below. |
+| `--polish {nelder-mead,powell}` | Local refinement after a global optimizer, using 25% of the same budget (also `polish =` in `[fit]`). |
 | `--seed INTEGER` | Random seed for stochastic optimizers, default `20261014`. |
 | `--from-fit path/to/fit.json` | **Runs solver**: load a saved fit's native parameter file and stored K, verify CIF SHA, regenerate all physical orbitals and plot. |
 | `--from-parameters PATH` | **Runs solver**: compute full original YAeHMOP bands with YOUR table; skips image fitting. |
@@ -47,6 +48,24 @@ python USER_WORKFLOW/bands_fit.py material.cif config.ini \
   --image target.csv --mode csv --pairs 2 --budget 300 \
   --optimizer nelder-mead --outdir outputs/physical_fit
 ```
+
+### Optimizers
+
+Every trial is one physical YAeHMOP calculation; `--budget` is the exact number of calls.
+
+| `--optimizer` | What runs | Notes |
+|---|---|---|
+| `nelder-mead` (default) | Short differential evolution from the stock table, then bounded Nelder-Mead | Budget >= 80 |
+| `simulated-annealing`, `sa-nelder-mead`, `hooke-jeeves` | 60% of the budget as the default staged fit, 40% refinement with the chosen method | Budget >= 160 |
+| `differential-evolution` | Full scipy DE, population 6 x parameters, Latin hypercube, until the budget | Global |
+| `bayesian` | Gaussian process (Matern 5/2) on log(loss) + expected improvement | Global; needs `scikit-learn`; each step refits the GP, so it is slow above a few hundred calls |
+| `cmaes` | CMA-ES (package `cma`), started at the stock table | Global; needs `cma` |
+| `genetic` | Real-coded GA: tournament, SBX crossover, polynomial mutation, elitism | Global |
+| `powell` | Bounded Powell from the stock table | Local |
+
+The global methods (and `powell`) run from the stock parameters with the whole budget and accept `--polish`. They were ported from `dftb_sk_gen`; there they batch evaluations in parallel, here evaluation is sequential. Diamond test (synthetic 3D EHT reference, K=2.0, 1V+1C): with 160 calls `nelder-mead` 0.044 eV, `bayesian` 0.26, `differential-evolution` 0.33, `cmaes` 0.41, `powell` 0.70, `genetic` 0.89 eV; with 1000 calls `nelder-mead` 0.0097, `cmaes` 0.0098, `differential-evolution` 0.025, `genetic` 0.038, `powell` 0.095 eV. A start near the answer favours the local default; wide, unknown landscapes are where the global methods are meant to help.
+
+`family_fit.py` accepts `--optimizer {nelder-mead,differential-evolution,bayesian,cmaes,genetic,powell}` and `--polish`. `parameter_fitter/fit_sparse_window.py` accepts all of them plus `--polish-fraction`.
 
 ## Image converter: `USER_WORKFLOW/prepare_band_png.py`
 
