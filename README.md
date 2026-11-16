@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/bandfit_logo_dark.svg" alt="YAeHMOP BandFit" width="560"></p>
+
 # YAeHMOP BandFit
 
 **Fit and visualize electronic bands with physical extended Hückel theory — 2, 4, 6 or 8 bands.**
