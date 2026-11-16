@@ -141,7 +141,36 @@ pairs only when the reference really contains that many identifiable bands.
 % ================================================================ 2
 \section{Installation}
 
-\subsection{Python environment}
+\subsection{Automatic installation: \cmd{install.sh}}
+
+The script creates (or updates) the conda environment from \cmd{environment.yml}, checks the Python
+packages, configures YAeHMOP and runs one real test calculation:
+
+\begin{lstlisting}[style=sh]
+git clone https://github.com/tromer-unb/yaehmop-bandfit.git
+cd yaehmop-bandfit
+./install.sh --build-yaehmop --tests     # also downloads and compiles YAeHMOP into the environment
+conda activate yaehmop-bandfit
+\end{lstlisting}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{>{\ttfamily}l L}
+\toprule
+\normalfont Option & Effect \\
+\midrule
+--env NAME & environment name (default \cmd{yaehmop-bandfit}) \\
+--build-yaehmop & clone upstream YAeHMOP (commit \cmd{4ded45b} by default, change with \cmd{--yaehmop-ref}), compile it with the conda compiler and OpenBLAS, install \cmd{bind} and \cmd{eht\_parms.dat} inside the environment \\
+--yaehmop-bind, --yaehmop-params & use a YAeHMOP that is already installed \\
+--tests & run the test suite at the end \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+In both cases \cmd{YAEHMOP\_BIND} and \cmd{YAEHMOP\_PARAM\_FILE} are stored in the environment and set
+on \cmd{conda activate}. Without these options the values already exported in the shell are kept. The
+script uses the fast \cmd{libmamba} solver when available.
+
+\subsection{Python environment by hand}
 
 Two options. With conda, using the \cmd{environment.yml} at the repository root (it also installs the
 optional packages of the Bayesian and CMA-ES optimizers):

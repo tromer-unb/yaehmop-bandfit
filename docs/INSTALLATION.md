@@ -1,5 +1,14 @@
 # Installation and runtime environments
 
+## Automatic installation (conda)
+
+```bash
+./install.sh --build-yaehmop --tests      # conda env + YAeHMOP compiled inside it + tests
+conda activate yaehmop-bandfit
+```
+
+`install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation. Use `--yaehmop-bind PATH --yaehmop-params PATH` for an existing YAeHMOP instead of `--build-yaehmop`, `--env NAME` for another name and `--help` for all options.
+
 ## Supported local environment
 
 Recommended: Python 3.10+ on Linux or macOS. Native YAeHMOP is a separate C/Fortran executable and may require compiler, BLAS/LAPACK and platform-specific build dependencies. The Python input formatter and plotting utilities do **not** need native YAeHMOP.

@@ -1,0 +1,19 @@
+# Conda environment of yaehmop-bandfit.
+#   conda env create -f environment.yml
+#   conda activate yaehmop-bandfit
+# YAeHMOP itself (bind + eht_parms.dat) is installed separately; point
+# YAEHMOP_BIND and YAEHMOP_PARAM_FILE to it (see docs/INSTALLATION.md).
+name: yaehmop-bandfit
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.24
+  - scipy>=1.10
+  - ase>=3.22
+  - pillow>=10.0
+  - matplotlib-base>=3.7   # without the Qt GUI (plots are saved to files)
+  - pyyaml>=6.0
+  - scikit-learn           # optimizer "bayesian" (Gaussian process)
+  - cma                    # optimizer "cmaes"
