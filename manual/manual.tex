@@ -495,6 +495,46 @@ answer favours the local default; wide, unknown landscapes are where the global 
 help. In \cmd{family\_fit.py}, \cmd{--optimizer} accepts \cmd{nelder-mead} and the five global methods,
 plus \cmd{--polish}.
 
+\subsection{Older fitters and alternative objectives}
+
+Two older programs in \cmd{parameter\_fitter/} have fixed strategies of their own and are not reached by
+\cmd{--optimizer}:
+
+\begin{itemize}
+  \item \cmd{fit\_shared.py} (expert prototype for several materials, traces all orbitals): differential
+        evolution followed by Nelder--Mead in two blocks, first the shape parameters ($\zeta$, $c_2/c_1$,
+        $K$) and then the $H_{ii}$, and finally one Nelder--Mead over all parameters together. Sizes are
+        set in the YAML under \cmd{shared: optimizer:} (\cmd{popsize}, \cmd{shape\_maxiter},
+        \cmd{hii\_maxiter}, \cmd{shape\_local\_maxiter}, \cmd{hii\_local\_maxiter}, \cmd{joint\_maxiter},
+        \cmd{joint\_maxfev}).
+  \item \cmd{fit\_from\_image.py} (first fitter, directly on a blue or dark-line image): differential
+        evolution (\cmd{--maxiter 6}, \cmd{--popsize 5}) followed by Nelder--Mead
+        (\cmd{--local-maxiter 160}). Its loss compares model and image curves in both directions:
+        $0.65\,r_{m\to i} + 0.35\,r_{i\to m} + w_\text{gap}|\Delta E_g| + w_\text{reg}R$.
+\end{itemize}
+
+\cmd{p3\_objectives.py} also defines eleven alternative loss functions from an earlier loss study.
+They are kept in the code but \textbf{no command uses them}; the fitters above always use the loss of
+section 5.2.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{>{\ttfamily}l L}
+\toprule
+\normalfont Loss & What it emphasizes \\
+\midrule
+global & full RMSE and k-weighted RMSE, plus gap error \\
+shape-gap & full RMSE with a hinge penalty when the gap error exceeds 0.05 eV \\
+frontier & states inside a window around the gap and the two band edges \\
+k-ml-weights & k points weighted by a random forest trained once on the starting residual (weights only; not an optimizer) \\
+dispersion & adds the error of the band slopes along the path \\
+pareto, strict-pareto & frontier accuracy while forbidding the full RMSE to grow beyond the start (strict: tighter gap penalty) \\
+valence2, valence2-global & valence bands plus the first conduction bands (Ribeiro et al.\ 2014 selection); the global variant also protects the full RMSE \\
+edge4, edge4-global & two valence and two conduction bands; the global variant also protects the full RMSE \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
 % ================================================================ 7
 \section{Frozen transfer}
 
