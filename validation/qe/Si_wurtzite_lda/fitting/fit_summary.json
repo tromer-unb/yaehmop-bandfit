@@ -1,0 +1,81 @@
+{
+  "name": "Si_wurtzite_lda",
+  "metrics": {
+    "selected_rmse_eV": 1.2415030561191946,
+    "two_rmse_eV": 1.2415030561191946,
+    "four_rmse_eV": null,
+    "valence_rmse_eV": 0.9132545261170394,
+    "conduction_rmse_eV": 1.4995418791195336,
+    "frontier_valence_rmse_eV": 0.9132545261170394,
+    "frontier_conduction_rmse_eV": 1.4995418791195336,
+    "valence2_rmse_eV": null,
+    "conduction2_rmse_eV": null,
+    "gap_error_eV": 0.0009537905789560597,
+    "ref_gap_eV": 0.6645993094210443,
+    "model_gap_eV": 0.6655531000000003,
+    "nocc": 8,
+    "norb": 16,
+    "n_pairs": 1,
+    "role": "train"
+  },
+  "reference_type": "dft",
+  "dft_reference": {
+    "dft_dir": "..",
+    "code": "qe",
+    "files": {
+      "structure": "../si.bands.out",
+      "eigenvalues": "../si.bands"
+    },
+    "notes": [
+      "eigenvalues from the bands.x file; cell and electrons from the pw.x output"
+    ],
+    "formula": "Si4",
+    "n_kpoints": 100,
+    "n_bands": 16,
+    "occupied_bands": 8,
+    "occupied_from": "nelec=16",
+    "fermi_eV": null,
+    "gap_on_path_eV": 0.6529999999999996,
+    "periodic_dim": 3,
+    "periodic_dim_from": "vacuum detection",
+    "yaehmop_path": [
+      "A",
+      "L",
+      "M",
+      "\u0393",
+      "A",
+      "H",
+      "K",
+      "\u0393"
+    ],
+    "yaehmop_points_per_line": 15,
+    "structure": "POSCAR"
+  },
+  "cif": "POSCAR",
+  "structure_format": "vasp",
+  "cif_sha256": "991a99d56228f8405470aadbaef9a808b5ccb76a8f7cdabbda25436c3faf1e38",
+  "reference_input": "reference_bands.npz",
+  "input_sha256": "872fe3a66395bdc726d8144fe0b4aadd4dc0972ac08bc1db5dd2daa1498e74d6",
+  "n_pairs": 1,
+  "n_scored_bands": 2,
+  "optimizer_evaluations": 300,
+  "initialization_calls": 300,
+  "refinement_calls": 0,
+  "requested_total_budget": 300,
+  "optimizer_choice": "nelder-mead",
+  "polish": null,
+  "selected_rmse_eV": 1.2415030561191946,
+  "gap_error_eV": 0.0009537905789560597,
+  "K_EHT": 1.354038131096696,
+  "periodic_dim": 3,
+  "overlap_radius": 5,
+  "native_parameters": "param_best_native.dat",
+  "figure": "bands_comparison.png",
+  "full_figure": "bands_full_comparison.png",
+  "note": "Raw DFT eigenvalues interpolated at the YAeHMOP k points; trained only 2*n_pairs frontier bands",
+  "hamiltonian_overlap": {
+    "file": "hamiltonian_overlap.npz",
+    "n_kpoints": 106,
+    "n_orbitals": 16
+  }
+}

@@ -1,0 +1,36 @@
+&CONTROL
+   prefix = 'si'
+   calculation = 'scf'
+   restart_mode = 'from_scratch'
+   wf_collect = .false.
+   outdir = './'
+   wfcdir = './'
+   pseudo_dir = '../../../Pseudos/'
+   tstress = .true.
+   tprnfor = .true.
+/
+&SYSTEM
+   ibrav = 2
+   celldm(1) = 10.20
+   nat = 2
+   ntyp = 1
+   ecutwfc = 80
+   ecutrho = 640
+/
+ &ELECTRONS
+   electron_maxstep = 100
+   conv_thr = 1.0d-10
+   mixing_mode = 'plain'
+   mixing_beta = 0.7
+   mixing_ndim = 8
+   diagonalization = 'david'
+   diago_david_ndim = 4
+   diago_full_acc = .false.
+/
+ATOMIC_SPECIES
+  Si   28.0855  Si.pz-n-rrkjus_psl.0.1.UPF
+ATOMIC_POSITIONS alat
+  Si  0.00000   0.00000   0.00000
+  Si  0.25000   0.25000   0.25000  
+K_POINTS automatic 
+12 12 12  0 0 0

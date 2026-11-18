@@ -283,6 +283,23 @@ hamiltonian_overlap.npz  YAeHMOP Hamiltonian H(k) [eV] and overlap S(k), complex
 yaehmop_matrices.bind    YAeHMOP input that produced the matrices (K points block)
 """
 
+def portable_paths(obj,fdir):
+    """Absolute paths -> relative to fdir inside the repository, else file name only."""
+    import os
+    root=ROOT.resolve();fdir=Path(fdir).resolve()
+    if isinstance(obj,dict):return {k:portable_paths(v,fdir) for k,v in obj.items()}
+    if isinstance(obj,list):return [portable_paths(v,fdir) for v in obj]
+    if isinstance(obj,str) and obj.startswith("/"):
+        tail=""
+        if " ..." in obj:obj,tail=obj.split(" ...",1);tail=" ..."+tail
+        q=Path(obj)
+        try:
+            q.resolve().relative_to(root)
+            return os.path.relpath(q.resolve(),fdir)+tail
+        except ValueError:
+            return q.name+tail
+    return obj
+
 def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,dim,radius,summary):
     """Standard output folder of every fit: parameters, figures, H(k) and S(k)."""
     import shutil
@@ -299,7 +316,8 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
     shape=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir/"hamiltonian_overlap.npz")
     summary=dict(summary,hamiltonian_overlap=dict(file="hamiltonian_overlap.npz",n_kpoints=int(shape[0]),
                                                   n_orbitals=int(shape[1])))
-    (fdir/"fit_summary.json").write_text(json.dumps(summary,indent=2,default=str)+"\n")
+    summary=portable_paths(json.loads(json.dumps(summary,default=str)),fdir)
+    (fdir/"fit_summary.json").write_text(json.dumps(summary,indent=2)+"\n")
     (fdir/"README.txt").write_text(FITTING_README)
     print("FITTING_DIR",fdir,flush=True)
     return fdir

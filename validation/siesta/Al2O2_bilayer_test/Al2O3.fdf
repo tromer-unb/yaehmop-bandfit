@@ -1,0 +1,124 @@
+SystemName           hexagonal AlO Bilayer  
+SystemLabel         Al2O3    
+
+NumberOfAtoms       4
+NumberOfSpecies     2
+
+%block ChemicalSpeciesLabel
+ 1    8   O
+ 2   13  Al
+%endblock ChemicalSpeciesLabel
+%block PAO.BasisSizes
+       O       DZP
+       Al      DZP
+%endblock PAO.BasisSizes
+PAO.EnergyShift      0.10 eV
+
+WriteForces       true
+
+#WriteMullikenPop  1
+#SaveRho           true
+#WriteDenchar      true
+#SaveTotalPotencial   true
+#SaveElectrostaticPotencial   true
+#%block WaveFuncKPoints       
+#     0.00   0.00   0.00  from 1 to 400
+# %endblock WaveFuncKPoints       
+# WriteWaveFunctions        true
+# WriteCoorStep        true
+# %block AtomicCoordinatesOrigin
+#    2.0   2.0   2.0
+# %endblock AtomicCoordinatesOrigin
+
+WriteMDhistory      true
+
+Write.H.end.of.cycle true
+
+SaveHS true
+
+# %block GeometryConstraints
+#    position from -1  to -68
+# %endblock GeometryConstraints
+
+WriteMDXmol  .true.
+
+LatticeConstant          1.0   Ang
+%block LatticeVectors
+        2.957596    0.000752    0.000007
+       -1.478986    2.561952    0.000256
+        0.000065    0.002776   30.897848
+%endblock LatticeVectors
+
+%block kgrid_Monkhorst_Pack
+   10   0   0   0.0
+   0   10   0   0.0
+   0    0   1   0.0
+%endblock kgrid_Monkhorst_Pack
+
+BandLinesScale   ReciprocalLatticeVectors
+%block BandLines
+1    0.0000000000     0.0000000000     0.0000000000     K.1
+200   0.6666666667    -0.3333333333     0.0000000000     K.2
+200   0.5000000000     0.0000000000     0.0000000000     K.3
+200   0.0000000000     0.0000000000     0.0000000000     K.4
+%endblock BandLines
+
+
+
+AtomCoorFormatOut   Ang 
+WriteCoorXmol         .true.
+
+#WriteWaveFunctions              true
+#%block WaveFuncKPoints
+#   0.00  0.00  0.00    from  28  to  37   
+#%endblock WaveFuncKPoints
+#%block SuperCell
+#    4   0   0
+#    0   4   0
+#    0   0   1
+#%endblock SuperCell
+#OpticalCalculation     true
+#Optical.EnergyMinimum    4.0   eV
+#Optical.EnergyMaximum   16.0   eV
+#Optical.Broaden          0.050  eV
+
+%block ProjectedDensityOfStates
+      -25.0    5.0  0.1000  1000    eV
+%endblock ProjectedDensityOfStates
+
+#%block LocalDensityOfStates
+#    -6.40000    -5.22000    eV
+#%endblock LocalDensityOfStates
+
+XC.functional        GGA
+XC.authors           PBE
+#SpinPolarized         .true.
+#NumberOfEigenStates   50 
+
+MaxSCFIterations     300
+DM.MixingWeight      0.3
+DM.NumberPulay       3
+DM.Tolerance         1.d-4 eV
+DM.EnergyTolerance   1.d-5 eV
+#UseSaveData          true  
+MeshCutOff          500.0  Ry
+
+SolutionMethod       diagon
+ElectronicTemperature  25 meV
+
+MD.TypeOfRun           cg
+MD.NumCGsteps          0
+MD.MaxCGDispl         0.01  Ang
+MD.MaxForceTol        0.02 eV/Ang
+MD.VariableCell       .true.
+#MD.TargetPressure     0.0  GPa
+#WriteMDXmol           T
+
+AtomicCoordinatesFormat  Ang
+%block AtomicCoordinatesAndAtomicSpecies
+    1.72453086    0.92887303    1.30664111   1       1  O
+    0.24620067    0.07417604    1.99229948   2       2  Al
+    0.24588557    0.07480670    4.56889522   2       3  Al
+    1.72449475    0.92952257    5.25433821   1       4  O
+%endblock AtomicCoordinatesAndAtomicSpecies
+

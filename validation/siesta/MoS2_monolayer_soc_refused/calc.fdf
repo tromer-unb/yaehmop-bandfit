@@ -1,0 +1,50 @@
+%include struct.fdf
+PAO.BasisSize DZP
+PAO.EnergyShift      0.02 Ry
+
+xc.functional      GGA    # Default vaxc.authors         HSE    # Default value
+xc.authors        PBE    # Default value
+
+SpinOrbit .true.
+
+%block DM.InitSpin
+  1 0.0 0.0 0.0
+  2 0.0 0.0 0.0
+  3 0.0 0.0 0.0
+%endblock DM.InitSpin
+
+MaxSCFIterations     300
+DM.MixingWeight      0.3
+DM.NumberPulay       3
+DM.Tolerance         1.d-5 eV
+DM.EnergyTolerance   1.d-6 eV
+
+MeshCutOff          400.0  Ry
+FilterCutoff        150.0  Ry
+
+SolutionMethod       diagon
+ElectronicTemperature  25 meV
+
+
+CDF.Save true
+CDF.Compress 9
+SaveHS true
+SaveRho true
+
+
+%block kgrid.MonkhorstPack
+  12  1 1 0.
+   1 12 1 0.
+   0  0 1 0.
+%endblock
+
+
+
+BandLinesScale ReciprocalLatticeVectors
+%block BandLines
+1  0.5  0.0  0.0
+20 0.0  0.0  0.0
+20 0.33333333 0.33333333 0.000
+20 0.5  0.0  0.0
+%endblock BandLines
+
