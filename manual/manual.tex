@@ -676,6 +676,119 @@ edge4, edge4-global & two valence and two conduction bands; the global variant a
 \end{tabularx}
 \end{center}
 
+% ================================================================ 6b
+\section{Fitting to DFT bands: objective, basis and strategies}\label{sec:strategies}
+
+With a numerical DFT reference (section~\ref{sec:dft}) the whole spectrum is known, so the fit can use more than
+the $n_{\rm pairs}$ frontier bands. The focus is the bands near the Fermi level; distant bands may stay worse.
+
+\subsection{Band-window objective (\cmd{--objective window}, default for DFT)}
+Ported from the \cmd{critical} objective of dftb\_sk\_gen (\cmd{parameter\_fitter/band\_objective.py}). Every DFT
+band inside a window around the gap ($-6$ to $+4$~eV from the valence-band maximum by default) is compared with the EHT
+band at the same position counted from the gap (valence 1 = top of the valence, conduction 1 = bottom of the
+conduction), both aligned at their own VBM. The Fermi level is taken in the middle of the gap, $E_F=E_{\rm mid}$, and every
+state counts with
+\[
+g(E)=w_{\rm far}+(1-w_{\rm far})\,e^{-|E-E_F|/E_s},\qquad w_{\rm far}=0.05,\ E_s=2~\text{eV},
+\]
+so a band 2~eV away weighs $\approx 40\%$ of one at $E_F$ and a band 6~eV away $\approx 10\%$. The cost is
+$\sqrt{\sum_i w_i\,t_i^2}$ with the terms
+\begin{center}\small
+\begin{tabularx}{\textwidth}{l L c}
+\toprule
+Term & Content & Weight \\
+\midrule
+valence, conduction & $g$-weighted RMS of the states in the window & 1, 1 \\
+frontier & RMS weighted by $e^{-|E-E_F|/1\,{\rm eV}}$ (sharper priority of the states nearest $E_F$) & 3 \\
+gap indirect, direct & errors of the fundamental and of the direct gap & 5, 3 \\
+VBM, CBM & EHT energy at the k of the DFT edge, position of the edge along the path, RMS within 1~eV of the edge & 4, 4 \\
+high symmetry & $g$-weighted RMS at the high-symmetry points & 4 \\
+extrema & $g$-weighted errors at the local maxima/minima of every band, and their positions in the segment & 4, 2 \\
+\bottomrule
+\end{tabularx}\end{center}
+All weights, the window, $E_s$ and $w_{\rm far}$ are set in an \cmd{[objective]} section of the INI file (names as in
+\cmd{WindowSettings}, e.g.\ \cmd{w\_extrema = 6}); \cmd{--objective frontier} restores the earlier objective.
+
+\subsection{Larger EHT basis (\cmd{--basis-add})}
+YAeHMOP accepts one shell per angular momentum and atom ($s,p,d,f$), so the minimal basis of the stock table can be
+extended with the missing shells: \cmd{--basis-add "S:d H:p"} or \cmd{auto} ($p$ where missing, e.g.\ H; $d$ on every
+element with $p$ but no $d$, e.g.\ Si, C, S, I; the filled $3d$ of Zn, which the stock table lacks although it counts
+12 electrons). Added shells start from estimates (a $d$ shell 4~eV above the $p$ level with $\zeta=0.8\,\zeta_p$; Zn $3d$
+double-zeta) and are fitted with the rest; they add empty states and do not change the electron count.
+
+\subsection{Comparison on the validation examples}
+\cmd{validation/compare\_strategies.py} refits every example with several protocols and scores all of them with the
+same measures; outputs go to \cmd{validation/<code>/<example>/fitting/<protocol>/}. With 2000 YAeHMOP calls per fit,
+RMS of the states within 2~eV of $E_F$ (eV):
+\begin{center}\small
+\begin{tabular}{l r r l}
+\toprule
+System & frontier (earlier) & best & best protocol \\
+\midrule
+MoS$_2$, FHI-aims HSE06 & 0.147 & 0.118 & window, genetic + NM \\
+MoS$_2$, FHI-aims PBE & 1.706 & 0.183 & window, CMA-ES + NM \\
+3C-SiC, QE PBE & 1.125 & 0.266 & window, genetic + NM, extended basis \\
+Si diamond, QE LDA & 0.551 & 0.220 & window, genetic + NM, extended basis \\
+Si wurtzite, QE LDA & 1.390 & 0.718 & window, genetic + NM, extended basis \\
+Al$_2$O$_2$, SIESTA & 0.410 & 0.092 & window, CMA-ES + NM \\
+C$_{52}$H$_{16}$ nanoribbon, SIESTA & 0.434 & 0.119 & window, genetic + NM, extended basis \\
+In$_2$S$_2$, VASP PBE & 0.370 & 0.154 & window, CMA-ES + NM \\
+TiBr$_2$, VASP PBE & 1.060 & 0.208 & window, genetic + NM \\
+ZnI$_2$, VASP PBE & --- & 0.222 & window, genetic + NM, extended basis \\
+\bottomrule
+\end{tabular}\end{center}
+The window objective wins everywhere; the extended basis is needed for Si, SiC, the nanoribbon and ZnI$_2$ (which cannot
+be fitted at all without the Zn $3d$); genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as best optimizer, so
+trying both is worthwhile.
+
+% ================================================================ 6c
+\section{Spin--orbit coupling}\label{sec:soc}
+
+YAeHMOP has no spin--orbit term. It is added after the spinless fit (\cmd{parameter\_fitter/soc.py},
+\cmd{USER\_WORKFLOW/soc\_fit.py}) in the on-site approximation used by DFTB+ and by tight-binding models:
+\[
+H_{\rm SOC}=\sum_{A}\sum_{l\ge1}\lambda_{A,l}\,\mathbf L\cdot\mathbf S ,
+\]
+acting only between orbitals of the same shell of the same atom. The basis becomes a spinor basis of $2n$ functions,
+\textbf{first the $n$ orbitals with spin up, then the same $n$ orbitals with spin down}. With $\mathbf S=\boldsymbol\sigma/2$,
+\[
+H_{\uparrow\uparrow}=\tfrac{\lambda}{2}L_z,\quad H_{\downarrow\downarrow}=-\tfrac{\lambda}{2}L_z,\quad
+H_{\uparrow\downarrow}=\tfrac{\lambda}{2}(L_x-iL_y),\quad H_{\downarrow\uparrow}=\tfrac{\lambda}{2}(L_x+iL_y),
+\]
+and $H(\mathbf k)\otimes I_2+H_{\rm SOC}$, $S(\mathbf k)\otimes I_2$ are diagonalized (the on-site overlap of different
+orbitals of an atom is zero, so $H_{\rm SOC}$ needs no overlap correction). The matrices of $\mathbf L$ in YAeHMOP's real
+orbitals are built from the complex spherical harmonics (Condon--Shortley phase); the code checks
+$[L_x,L_y]=iL_z$, $L^2=l(l+1)$ and the atomic splittings ($p$: $j=3/2$ at $+\lambda/2$, $j=1/2$ at $-\lambda$; $d$: $+\lambda$
+and $-3\lambda/2$).
+
+\paragraph{Fitting the $\lambda$.} The EHT parameters of the spinless fit stay fixed; only the $\lambda$'s are fitted
+against a DFT calculation \emph{with} spin--orbit (read with \cmd{soc=True}: every band is a spinor with one electron).
+Since only $H_{\rm SOC}$ changes, each trial diagonalizes $2n\times2n$ matrices at the path k points, without new
+YAeHMOP runs (differential evolution, then Nelder-Mead). The cost is the band-window objective plus, with weight
+\cmd{--w-split} (20), the $g$-weighted RMS of the spin--orbit splittings $E_{2j+1}-E_{2j}$ of the three valence and three
+conduction spinor pairs nearest the gap; this term measures the effect of the coupling independently of the error left by
+the spinless fit (it vanishes in centrosymmetric crystals, where the pairs are degenerate). Default shells: $d$ of the
+transition metals, none for Zn/Cd/Hg (filled, deep $d$; empty $p$), $p$ and $d$ of the other elements; choose others with
+\cmd{--soc-shells "Mo:d S:p"}.
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/soc_fit.py --dft-dir path/to/bands-soc --dft-code vasp \
+  --from-fitting outputs/material/fitting/window-ga --outdir outputs/material_soc
+\end{lstlisting}
+\paragraph{Outputs} (\cmd{OUTDIR/fitting-soc} or \cmd{--fitting-dir}): \cmd{soc\_parameters.txt} ($\lambda$ in eV per
+element and shell), \cmd{parameters\_huckel.dat} (the fixed EHT table), \cmd{huckel-SOC.dat} (WanTiBEXOS \cmd{SOC} format:
+header \cmd{SOC}, scissors, Fermi level 0, lattice vectors, $2n$, number of cells; complex \cmd{ReH ImH} and \cmd{S};
+$H(\mathbf R)-E_{\rm mid}S(\mathbf R)$ in each spin block plus $H_{\rm SOC}$ on $\mathbf R=0$), \cmd{basis\_set-SOC} (spin
+column 1 then $-1$), \cmd{orbitals.dat}, \cmd{POSCAR}, the comparison figures and \cmd{fit\_summary.json} (errors with and
+without SOC, $E_{\rm mid}$, check of \cmd{huckel-SOC.dat}).
+
+\paragraph{First results.} MoS$_2$ (FHI-aims HSE06 with SOC): $\lambda_{\rm Mo\,d}=0.060$, $\lambda_{\rm S\,p}=0.32$~eV; gap
+error $+0.128\to+0.058$~eV; valence splitting at K 0.19~eV (DFT 0.14~eV). ZnI$_2$ (VASP PBE+SOC): $\lambda_{\rm I\,p}=0.61$~eV,
+close to the atomic value of iodine; RMS within 2~eV of $E_F$ $0.231\to0.176$~eV, gap error $+0.43\to+0.14$~eV. In$_2$S$_2$
+(VASP): $\lambda_{\rm In\,p}=0.095$, $\lambda_{\rm S\,p}=0.25$~eV; gap error $+0.20\to+0.08$~eV. \cmd{wtb.x} reproduces the
+EHT+SOC bands of \cmd{huckel-SOC.dat} for MoS$_2$ to $3\times10^{-5}$~eV near the gap (same splitting at K, 0.1898~eV).
+Limitations: the $\lambda$'s compensate part of the error of the spinless EHT (e.g.\ the S $3p$ value is larger than atomic
+estimates); a joint fit of EHT parameters and $\lambda$'s is a possible next step.
+
 % ================================================================ 7
 \section{Frozen transfer}
 

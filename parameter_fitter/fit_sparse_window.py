@@ -17,6 +17,7 @@ import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
 from structure_io import read_structure,resolved_structure_format
 from dft_bands import load_reference,eht_reference
+from band_objective import WindowSettings,window_error,extend_basis,parse_basis_add,OBJECTIVES
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -178,6 +179,16 @@ class Fitter:
         self.elements=elements
         self.bind,table=resolve_yaehmop_assets()
         self.stockparams=valid_basis(subset_for_elements(parse_parameter_table(table),elements))
+        self.basis_add=parse_basis_add(config.get("basis_add"))
+        if self.basis_add:
+            before={el:set(v) for el,v in self.stockparams.items()}
+            self.stockparams=extend_basis(self.stockparams,self.basis_add)
+            self.basis_add={el:sorted(set(v)-before[el]-{"atnum","nval"}) for el,v in self.stockparams.items()
+                            if set(v)-before[el]}
+        self.objective_name=str(config.get("objective","frontier"))
+        if self.objective_name not in OBJECTIVES:
+            raise ValueError(f"objective must be one of {OBJECTIVES}")
+        self.wset=WindowSettings.from_dict(config.get("objective_settings"))
         self.train=[parse_sample(e,base,self.stockparams,config) for e in self.train_entries]
         self.specs,self.stock,self.bounds,self.scales=build_specs(self.stockparams,elements)
         self.bounds=list(self.bounds)
@@ -209,8 +220,14 @@ class Fitter:
             values=[];weights=[]
             line=dict(K=float(K))
             for s in self.train:
-                m,_=scores(self.run(s,params,K,f"trial_{self.calls:07d}"),s)
-                val=m["selected_rmse_eV"]+self.gap_w*abs(m["gap_error_eV"])
+                full=self.run(s,params,K,f"trial_{self.calls:07d}")
+                m,_=scores(full,s)
+                if self.objective_name=="window":
+                    wm=self.window_metrics(full,s)
+                    val=wm["total"]
+                    line[s["name"]+"_window_rms_eV"]=wm["window_rms_eV"]
+                else:
+                    val=m["selected_rmse_eV"]+self.gap_w*abs(m["gap_error_eV"])
                 values.append(val);weights.append(s["weight"])
                 line[s["name"]+"_selected_rmse_eV"]=m["selected_rmse_eV"]
                 line[s["name"]+"_two_rmse_eV"]=m["two_rmse_eV"]
@@ -222,6 +239,12 @@ class Fitter:
             return cost,line
         except Exception as exc:
             return 1e4,{"error":str(exc)}
+    def window_metrics(self,full,s):
+        if s.get("target_all") is None:
+            raise ValueError("objective 'window' needs a numerical DFT reference")
+        E=full[s["kmask"]]
+        return window_error(s["target_all"],s["dft_nocc"],E,s["nocc"],s["kx"],
+                            [x for x,_ in s["ticks"]],self.wset)
     def characterize(self,x,withheld):
         params,K=apply_x(self.stockparams,self.specs,np.asarray(x,float))
         specs=list(self.train)
@@ -236,6 +259,8 @@ class Fitter:
         for s in specs:
             full=self.run(s,params,K,"final_eigen")
             met,b=scores(full,s)
+            if s.get("target_all") is not None:
+                met["window"]=self.window_metrics(full,s)
             met["role"]="train" if s["name"] in [t["name"] for t in self.train] else "test"
             result[s["name"]]=met
             extra={}
@@ -406,7 +431,9 @@ def main():
                               overlap_images=list(s["overlap_images"]))
                for s in f.train},
       structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
-                         for s in f.train})
+                         for s in f.train},
+      objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name=="window" else None,
+      basis_added=f.basis_add or None)
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

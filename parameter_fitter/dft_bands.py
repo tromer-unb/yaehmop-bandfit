@@ -221,8 +221,9 @@ def _read_eigenval(path):
     return np.array(kfrac), np.array(weights), spins, nelect
 
 
-def read_vasp(folder, dft_file=None):
+def read_vasp(folder, dft_file=None, soc=False):
     from ase.io import read
+    want_soc = soc
     folder = Path(folder)
     notes, files = [], {}
     vr = _pick([p for p in folder.glob("vasprun*.xml")], "vasprun.xml files", folder,
@@ -253,16 +254,18 @@ def read_vasp(folder, dft_file=None):
         soc = flags.get("LSORBIT", False) or flags.get("LNONCOLLINEAR", False)
         if "LSORBIT" not in flags and "LNONCOLLINEAR" not in flags:
             notes.append("no OUTCAR/INCAR: spin-orbit coupling assumed absent")
-    if soc:
+    if soc and not want_soc:
         raise ValueError("VASP reference with spin-orbit coupling (LSORBIT/LNONCOLLINEAR): "
-                         "EHT here is spinless; use a calculation without SOC")
+                         "EHT here is spinless; use a calculation without SOC (or soc_fit.py)")
+    if want_soc and not soc:
+        raise ValueError("Not a spin-orbit VASP calculation (LSORBIT/LNONCOLLINEAR not set)")
     E = _merge_spins(spins, notes)
     # Hybrid-functional band runs: SCF mesh (weight > 0) + path (weight 0).
     if np.any(weights == 0) and np.any(weights > 0):
         keep = weights == 0
         kfrac, E = kfrac[keep], E[keep]
         notes.append(f"dropped {int((~keep).sum())} weighted SCF k points (zero-weight band path kept)")
-    nocc = nocc_from_electrons(nelect)
+    nocc = nocc_from_electrons(nelect, spinor=want_soc)
     labels, nper, kpfile = _vasp_kpoints_labels(folder)
     if kpfile is not None:
         files["kpoints"] = str(kpfile)
@@ -323,7 +326,7 @@ def _qe_input_labels(folder, cell):
     return [], None
 
 
-def _read_qe_xml(path):
+def _read_qe_xml(path, soc=False):
     from ase import Atoms
     root = ET.parse(path).getroot()
     out = root.find("output")
@@ -333,8 +336,11 @@ def _read_qe_xml(path):
     bs = out.find("band_structure")
     lsda = bs.findtext("lsda", "false").strip().lower() == "true"
     noncolin = bs.findtext("noncolin", "false").strip().lower() == "true"
-    if noncolin or bs.findtext("spinorbit", "false").strip().lower() == "true":
+    is_soc = noncolin or bs.findtext("spinorbit", "false").strip().lower() == "true"
+    if is_soc and not soc:
         raise ValueError("QE reference is noncollinear / spin-orbit: not supported by spinless EHT")
+    if soc and not is_soc:
+        raise ValueError("Not a noncollinear / spin-orbit QE calculation")
     nelec = float(bs.findtext("nelec"))
     fermi = None
     for tag in ("fermi_energy", "highestOccupiedLevel"):
@@ -367,11 +373,14 @@ def alat_from(path):
     return float(m.group(1)) * BOHR if m else None
 
 
-def _read_pw_output(path):
+def _read_pw_output(path, soc=False):
     from ase import Atoms
     text = Path(path).read_text(errors="replace")
-    if "Noncollinear" in text or "spin-orbit" in text.lower() and "with spin-orbit" in text.lower():
+    is_soc = "Noncollinear" in text or "with spin-orbit" in text.lower()
+    if is_soc and not soc:
         raise ValueError("QE reference is noncollinear / spin-orbit: not supported by spinless EHT")
+    if soc and not is_soc:
+        raise ValueError("Not a noncollinear / spin-orbit pw.x calculation")
     alat = float(re.search(r"lattice parameter \(alat\)\s*=\s*([\d.]+)", text).group(1)) * BOHR
     axes = [re.search(rf"a\({i}\) = \(\s*([^)]+)\)", text).group(1) for i in (1, 2, 3)]
     cell = np.array([_floats(a)[:3] for a in axes]) * alat
@@ -452,7 +461,7 @@ def _filband_files(folder):
     return out
 
 
-def read_qe(folder, dft_file=None):
+def read_qe(folder, dft_file=None, soc=False):
     folder = Path(folder)
     notes, files = [], {}
     cand = list(folder.glob("*.save/data-file-schema.xml"))
@@ -488,11 +497,11 @@ def read_qe(folder, dft_file=None):
     else:
         raise FileNotFoundError(f"{folder}: no QE 'bands' XML (*.save/data-file-schema.xml) or pw.x bands output")
     if use_xml:
-        atoms, kfrac, spins, nelec, fermi, calc = _read_qe_xml(src)
+        atoms, kfrac, spins, nelec, fermi, calc = _read_qe_xml(src, soc)
         if calc != "bands":
             notes.append(f"XML is from a '{calc}' run, not 'bands'")
     else:
-        atoms, kfrac, spins, nelec, fermi = _read_pw_output(src)
+        atoms, kfrac, spins, nelec, fermi = _read_pw_output(src, soc)
         files["structure"] = str(src)
         if spins is None:   # pw.x did not print the bands (>100 k, low verbosity)
             fb = _pick(_filband_files(folder), "bands.x band files", folder)
@@ -511,7 +520,7 @@ def read_qe(folder, dft_file=None):
     labels, inp = _qe_input_labels(folder, np.asarray(atoms.cell))
     if inp is not None:
         files["labels"] = str(inp)
-    return DFTBands("qe", atoms, kfrac, E, nocc_from_electrons(nelec), fermi, None, labels, files, notes,
+    return DFTBands("qe", atoms, kfrac, E, nocc_from_electrons(nelec, spinor=soc), fermi, None, labels, files, notes,
                     nocc_source=f"nelec={nelec:g}")
 
 
@@ -537,7 +546,7 @@ def _read_siesta_bands_file(path):
     return fermi, kpath, [E[:, s, :] for s in range(nspin)], labels
 
 
-def read_siesta(folder, dft_file=None):
+def read_siesta(folder, dft_file=None, soc=False):
     from structure_io import _parse_fdf, _labelize, read_siesta_fdf, _length
     from ase.io import read
     folder = Path(folder)
@@ -571,8 +580,11 @@ def read_siesta(folder, dft_file=None):
     files["fdf"] = str(fdf)
     spin = " ".join(scal.get("spin", [])).lower()
     so = scal.get("spinorbit", ["F"])[0].lower().lstrip(".")
-    if so.startswith("t") or spin in ("so", "spin-orbit", "spinorbit", "nc", "non-colinear", "noncolinear", "non-collinear"):
+    is_soc = so.startswith("t") or spin in ("so", "spin-orbit", "spinorbit", "nc", "non-colinear", "noncolinear", "non-collinear")
+    if is_soc and not soc:
         raise ValueError("SIESTA reference with spin-orbit / noncollinear spin: not supported by spinless EHT")
+    if soc and not is_soc:
+        raise ValueError("Not a spin-orbit SIESTA calculation")
     atoms = None
     for ext in (".STRUCT_OUT", ".XV"):
         p = folder / (label + ext)
@@ -630,7 +642,7 @@ def _aims_band_file(path):
     return k, occ, e
 
 
-def read_aims(folder, dft_file=None):
+def read_aims(folder, dft_file=None, soc=False):
     from ase.io import read
     import warnings
     folder = Path(folder)
@@ -648,9 +660,13 @@ def read_aims(folder, dft_file=None):
         raise ValueError(f"{ctrl}: no 'output band' lines")
     text = ctrl.read_text(errors="replace")
     spin_on = re.search(r"^\s*spin\s+collinear", text, re.M) is not None
+    soc_wanted = soc
     soc = re.search(r"^\s*include_spin_orbit", text, re.M) is not None
     suffix = ""
-    if soc:
+    want_soc = soc_wanted
+    if want_soc and not soc:
+        raise ValueError("Not a spin-orbit FHI-aims calculation (no include_spin_orbit)")
+    if soc and not want_soc:
         if all((folder / f"band1{i + 1:03d}.out.no_soc").is_file() for i in range(len(bands_def))):
             suffix = ".no_soc"
             notes.append("spin-orbit run: the *.no_soc band files (scalar-relativistic) are used")
@@ -671,7 +687,7 @@ def read_aims(folder, dft_file=None):
         segments.append(np.arange(n0, n0 + len(k))); n0 += len(k)
     files["eigenvalues"] = str(folder / f"band1001.out{suffix}") + f" ... ({len(bands_def)} files)"
     kfrac = np.vstack(ks); occ = np.vstack(occs); E = np.vstack(es)
-    full = 1.0 if spin_on else 2.0
+    full = 1.0 if (spin_on or want_soc) else 2.0
     nk_occ = np.sum(occ > 0.5 * full, axis=1)
     if nk_occ.min() != nk_occ.max():
         raise ValueError("Occupations change along the path: metallic FHI-aims reference")
@@ -703,12 +719,16 @@ def read_aims(folder, dft_file=None):
 READERS = {"vasp": read_vasp, "qe": read_qe, "siesta": read_siesta, "aims": read_aims}
 
 
-def read_dft_bands(folder, code, dft_file=None, valence_bands=None):
-    """Read a DFT band-structure folder; checks for a positive gap."""
+def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False):
+    """Read a DFT band-structure folder; checks for a positive gap.
+
+    soc=True reads a spin-orbit (noncollinear) calculation instead: every band is a
+    spinor holding one electron, so nocc counts electrons, not pairs.
+    """
     folder = Path(folder).expanduser().resolve()
     if not folder.is_dir():
         raise FileNotFoundError(f"DFT folder not found: {folder}")
-    ref = READERS[normalize_code(code)](folder, dft_file)
+    ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
     if valence_bands is not None:
         ref.nocc = int(valence_bands); ref.nocc_source = "user (valence_bands)"
     if ref.energies.ndim != 2 or len(ref.kfrac) != len(ref.energies) or len(ref.kfrac) < 2:

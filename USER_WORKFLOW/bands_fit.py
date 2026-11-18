@@ -130,7 +130,7 @@ def write_bands_plot(npz,out_dir,n,*,title,also_csv=True,ref_name=None):
             w.writerows(np.column_stack((k,ref,E)))
     return m["rmse"]
 
-def write_full_comparison(npz,out_dir,*,title,emin=None,emax=None):
+def write_full_comparison(npz,out_dir,*,title,emin=None,emax=None,window_metrics=None):
     """All DFT bands (blue) and all EHT bands (red, dashed) in an energy window."""
     out_dir=Path(out_dir)
     d=np.load(npz)
@@ -151,7 +151,12 @@ def write_full_comparison(npz,out_dir,*,title,emin=None,emax=None):
     ax.set_ylim(lo,hi);_ticks(ax,d)
     ax.set_ylabel("Energy relative to midgap (eV)")
     ax.set_title(title)
-    _footer(fig,ax,m,n,"DFT",note=f"fitted: {n//2} VB + {n//2} CB; the other bands were not fitted")
+    note=f"bands of the figure above: {n//2} VB + {n//2} CB"
+    if window_metrics:
+        w=window_metrics
+        note=(f"window objective: {w['n_valence_compared']} VB + {w['n_conduction_compared']} CB compared, "
+              f"RMS in window = {w['window_rms_eV']:.3f} eV (VBM-aligned)")
+    _footer(fig,ax,m,n,"DFT",note=note)
     fig.savefig(out_dir/"bands_full_comparison.png",dpi=220)
     fig.savefig(out_dir/"bands_full_comparison.pdf");plt.close(fig)
     with (out_dir/"bands_full_comparison.csv").open("w",newline="") as f:
@@ -507,6 +512,18 @@ def evaluate_dft(entry,parameters,K,outdir,name,pairs,window):
     write_full_comparison(npz,outdir,title=f"{name} — all bands, EHT vs DFT",emin=window[0],emax=window[1])
     return met
 
+def objective_config(args,config,default):
+    """objective, its settings ([objective] section) and the extra basis shells."""
+    from band_objective import WindowSettings,parse_basis_add
+    fit=config["fit"]
+    name=args.objective or fit.get("objective",fallback=default)
+    sett={}
+    if config.has_section("objective"):
+        sett={k:v for k,v in config["objective"].items()}
+    WindowSettings.from_dict(sett)             # validate early
+    add=args.basis_add or fit.get("basis_add",fallback="")
+    return name,sett,parse_basis_add(add)
+
 def dft_main(args,parser,config,inputs,dft_dir):
     """Fit (or evaluate) EHT parameters against raw DFT eigenvalues of a folder."""
     ref_cfg=config["reference"];fit=config["fit"];bp=config["band_path"]
@@ -585,8 +602,13 @@ def dft_main(args,parser,config,inputs,dft_dir):
         print("BANDS_PLOT",outdir/"bands_comparison.png");print("FULL_PLOT",outdir/"bands_full_comparison.png")
         return
     budget,optimizer,polish=optimizer_settings(args,fit,parser)
+    try:
+        obj,obj_set,basis_add=objective_config(args,config,"window")
+    except ValueError as exc:
+        parser.error(str(exc))
     yml={"n_pairs":pairs,"points_per_line":step,"overlap_radius":int(radius),
          "gap_weight":float(fit.get("gap_weight",".35")),"reg_weight":float(fit.get("reg_weight",".04")),
+         "objective":obj,"objective_settings":obj_set,"basis_add":basis_add,
          "systems":[entry]}
     target=outdir/"fit_input.yaml"
     target.write_text(yaml.safe_dump(yml,sort_keys=False))
@@ -597,8 +619,11 @@ def dft_main(args,parser,config,inputs,dft_dir):
     rmse=write_bands_plot(bnpz,outdir,2*pairs,title=f"{name} — {pairs}VB + {pairs}CB, EHT fit to DFT")
     if abs(rmse-float(met["selected_rmse_eV"]))>1e-8:
         raise ValueError("Figure disagrees with optimizer metric")
-    write_full_comparison(bnpz,outdir,title=f"{name} — all bands, EHT fit vs DFT",emin=window[0],emax=window[1])
+    write_full_comparison(bnpz,outdir,title=f"{name} — all bands, EHT fit vs DFT",emin=window[0],emax=window[1],
+                          window_metrics=met.get("window"))
     status={"reference_type":"dft","dft_reference":info,"cif":str(cif),"structure_format":sfmt,
+        "objective":obj,"objective_settings":state.get("objective_settings"),"basis_added":state.get("basis_added"),
+        "window_metrics":met.get("window"),
         "cif_sha256":hashlib.sha256(Path(cif).read_bytes()).hexdigest(),
         "reference_input":str(npz),"input_sha256":hashlib.sha256(npz.read_bytes()).hexdigest(),
         "n_pairs":pairs,"n_scored_bands":2*pairs,
@@ -660,6 +685,13 @@ def main():
     parser.add_argument("--polish",choices=POLISH_METHODS,default=None,
                         help="local refinement after a global optimizer (25%% of the budget)")
     parser.add_argument("--seed",type=int,default=20261014)
+    parser.add_argument("--objective",choices=("frontier","window"),default=None,
+                        help="frontier: n_pairs bands around the gap (image/CSV default); window: every DFT band "
+                             "in an energy window with weights on gaps, band edges, Fermi-level states, critical "
+                             "points (DFT default; settings in [objective])")
+    parser.add_argument("--basis-add",default=None,
+                        help="extra EHT shells, e.g. 'S:d Zn:d H:p' ([fit] basis_add); started from "
+                             "estimates and fitted")
     parser.add_argument("--fitting-dir",type=Path,default=None,
                         help="folder for the standard fit outputs (parameters, figures, H(k), S(k)); "
                              "default OUTDIR/fitting")
@@ -769,8 +801,14 @@ def main():
           structure_label(cif))
     if not name or any(c in name for c in ("/","\\","..")):
         raise ValueError("Material name must not contain slash or '..'")
+    try:
+        _obj,_set,basis_add=objective_config(args,config,"frontier")
+    except ValueError as exc:
+        parser.error(str(exc))
+    if _obj!="frontier":
+        parser.error("objective 'window' needs a numerical DFT reference (--dft-dir)")
     yml={"n_pairs":pairs,"points_per_line":step,"trace_nx":nx,
-         "overlap_radius":int(radius),
+         "overlap_radius":int(radius),"basis_add":basis_add,
          "image_mode":"colored",
          "gap_weight":float(fit.get("gap_weight",".35")),
          "reg_weight":float(fit.get("reg_weight",".04")),

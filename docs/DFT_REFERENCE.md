@@ -100,6 +100,41 @@ absolute YAeHMOP energies; `hamiltonian_overlap_k.dat` has the unshifted values.
 Orbital order is YAeHMOP's: s; px, py, pz; dx²−y², dz², dxy, dxz, dyz
 (l, m as in sisl: px m=1, py m=−1, pz m=0; dxy −2, dyz −1, dz² 0, dxz 1, dx²−y² 2).
 
+## Objective, larger basis and strategies
+
+For DFT references the default objective is the **band window** (`--objective window`,
+`parameter_fitter/band_objective.py`, ported from dftb_sk_gen): every DFT band from −6 to
++4 eV around the VBM against the EHT band at the same place counted from the gap, both
+VBM-aligned, with the Fermi level in the middle of the gap and every state weighted by
+g(E) = 0.05 + 0.95·exp(−|E−E_F|/2 eV). Terms: valence and conduction RMS, a sharper
+frontier term, indirect and direct gap, VBM/CBM (energy, position, edge states),
+high-symmetry points and the local maxima/minima of every band (energy and position).
+Weights go in an `[objective]` INI section (`w_extrema = 6`, `energy_scale = 1.5`, ...);
+`--objective frontier` keeps the earlier n_pairs objective.
+
+`--basis-add "S:d H:p"` or `auto` adds shells YAeHMOP accepts but the stock table lacks
+(p on H, d on s/p elements, the 3d of Zn); they start from estimates and are fitted.
+
+`validation/compare_strategies.py` refits all examples with several protocols
+(`frontier-de`, `window-de`, `window-ga`, `window-cmaes`, `window-ga-basis`) into
+`validation/<code>/<example>/fitting/<protocol>/`; see the manual for the table. The window
+objective wins everywhere; genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as
+best; the extended basis is needed for Si, SiC, the nanoribbon and ZnI₂.
+
+## Spin–orbit coupling (`USER_WORKFLOW/soc_fit.py`)
+
+YAeHMOP has no SOC. `soc_fit.py` adds on-site λ L·S per element and shell on top of a
+spinless fit (EHT parameters fixed) and fits the λ's against a DFT calculation with SOC
+(band window + spin-orbit splittings of the pairs near the gap). The spinor basis has
+the n orbitals with spin up first, then the same n with spin down. Outputs in
+`fitting-soc/`: `soc_parameters.txt`, `huckel-SOC.dat` + `basis_set-SOC` (WanTiBEXOS SOC
+format), figures, `fit_summary.json`.
+
+```bash
+python USER_WORKFLOW/soc_fit.py --dft-dir path/to/bands-soc --dft-code vasp \
+    --from-fitting outputs/material/fitting --outdir outputs/material_soc
+```
+
 ## Validation examples
 
 `validation/<package>/<example>/` holds real DFT band calculations, each with its

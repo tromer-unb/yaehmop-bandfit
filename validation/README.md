@@ -2,13 +2,17 @@
 
 One folder per DFT package and one per example. Each example holds only the
 files the reader needs (no wavefunctions, charge densities, pseudopotentials or
-POTCAR). `fitting/` inside each example has the standard fit outputs
+POTCAR). `fitting/<protocol>/` inside each example has the standard outputs of one fit
+protocol (`frontier-de-300` is the first run; `frontier-de`, `window-de`, `window-ga`,
+`window-cmaes`, `window-ga-basis` come from `compare_strategies.py`; `soc-from-<protocol>`
+are spin-orbit fits made by `USER_WORKFLOW/soc_fit.py` on top of that protocol). Each has
 (parameters, comparison figures, YAeHMOP H(R)/S(R) in the WanTiBEXOS text format `huckel-NP.dat` + `basis_set-NP`, and H(k)/S(k) at the high-symmetry points), produced by
 
 ```bash
-./run_validation.sh                       # settings in fit_settings.ini
-./run_validation.sh --optimizer cmaes --budget 600   # any bands_fit.py option
+python compare_strategies.py --work /tmp/strategies --collect   # all protocols, results into fitting/<protocol>
+PROTOCOL=my-test ./run_validation.sh --optimizer cmaes --budget 600   # one protocol, any bands_fit.py option
 ```
+Examples marked with a `SOC_ONLY` file are spin-orbit references, used by `soc_fit.py` only.
 
 These examples are meant for comparing fitting strategies (optimizers, budgets,
 number of bands, objectives) on the same references.
@@ -26,3 +30,8 @@ number of bands, objectives) on the same references.
 | SIESTA | `MoS2_monolayer_soc_refused` | MoS₂ with spin–orbit | 2D | **refused on purpose** (spin–orbit): test of the refusal |
 | FHI-aims | `MoS2_monolayer_pbe` | MoS₂ monolayer, PBE | 2D | all-electron eigenvalues |
 | FHI-aims | `MoS2_monolayer_hse06_soc` | MoS₂ monolayer, HSE06 | 2D | SOC run: the `*.no_soc` band files are used |
+| VASP | `ZnI2_monolayer_pbe_soc` | ZnI₂ monolayer, PBE + SOC | 2D | `SOC_ONLY`; SOC fit on top of `ZnI2_monolayer_pbe/fitting/window-ga-basis` |
+| VASP | `In2S2_monolayer_pbe_soc` | In₂S₂ monolayer, PBE + SOC | 2D | `SOC_ONLY`; SOC fit on top of `In2S2_monolayer_pbe/fitting/window-cmaes` |
+
+The MoS₂ HSE06 example (FHI-aims) holds the SOC bands too: its spinless fits use the
+`*.no_soc` files and `fitting/soc-from-window-ga` uses the bands with SOC.
