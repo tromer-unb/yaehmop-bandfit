@@ -75,7 +75,7 @@ Every fit of `bands_fit.py` (DFT, image or CSV reference) writes, by default to
 | `tb-NP.dat` | real-space **H(R)** and **S(R)** of YAeHMOP, plain text in the **WanTiBEXOS** non-orthogonal format (same as `siesta2wtb.py`; use `DFT= S`, `PARAMS_FILE= "tb-NP.dat"`) |
 | `basis_set-NP` | WanTiBEXOS basis file: index, species, x y z (Å), l, m, spin |
 | `orbitals.dat` | orbital index, atom, orbital name, l, m |
-| `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points: `k1 k2 k3 i j ReH ImH ReS ImS` |
+| `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points. Header as in WanTiBEXOS: `NP`, scissors, Fermi level (EHT midgap, absolute), 3 lattice vectors (Å), number of basis orbitals, number of hopping vectors (cells of `tb-NP.dat`), number of k points; then `k1 k2 k3 i j ReH ImH ReS ImS` |
 | `yaehmop_matrices.bind` | YAeHMOP input of the matrix run (`K points` + `Dump Hamil/Overlap`) |
 | `fit_summary.json`, `README.txt` | metrics, settings, sources, checks; file description |
 

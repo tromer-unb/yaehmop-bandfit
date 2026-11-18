@@ -244,6 +244,12 @@ def path_kpoints(nodes,n):
     ks.append(nodes[-1])
     return np.array(ks)
 
+def write_tb_header(fermi,cell,nbasis,nvec):
+    """WanTiBEXOS header: NP, scissors, Fermi level, 3 lattice vectors, basis size, hopping vectors."""
+    s=f"NP\n0.000000\n{fermi:.6f}\n"
+    s+="".join(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n" for v in np.asarray(cell))
+    return s+f"{nbasis}\n{nvec}\n"
+
 def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None):
     """Text files with the YAeHMOP Hamiltonian and overlap of the final parameters.
 
@@ -294,9 +300,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     # so H(R) is written as H(R) - E_mid*S(R) with E_F = 0: wtb.x then gives exactly
     # the YAeHMOP eigenvalues minus the EHT midgap (bands below 0 = occupied).
     with open(fdir/"tb-NP.dat","w") as f:
-        f.write("NP\n0.000000\n0.000000\n")
-        for v in cell:f.write(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n")
-        f.write(f"{n}\n{len(kept)}\n#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
+        f.write(write_tb_header(0.0,cell,n,len(kept))+"#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
         for R,H,S in kept:
             r=R@cell;Hs=H-mid*S
             for i in range(n):
@@ -317,10 +321,11 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
             f.write(f"{b+1:6d}  {atom:8s} {orb:12s} {l} {m:2d}\n")
     nodes=sorted(set(node_index or [0,len(kpoints)-1]))
     with open(fdir/"hamiltonian_overlap_k.dat","w") as f:
-        f.write("# YAeHMOP H(k) [eV] and S(k) at the high-symmetry points of the band figure\n"
-                "# convention: H(k) = sum_R exp(i 2pi k.R) H(R); k in fractional reciprocal coordinates\n"
-                "# H(R), S(R) for all R: tb-NP.dat ; orbitals: orbitals.dat\n"
-                "# k1 k2 k3   i   j   ReH   ImH   ReS   ImS\n")
+        # Header as in the WanTiBEXOS files (type, scissors, Fermi level, lattice
+        # vectors [A], basis size, hopping vectors of tb-NP.dat), then k points.
+        # H(k) here is the raw YAeHMOP one, so the Fermi level is the EHT midgap.
+        f.write(write_tb_header(mid,cell,n,len(kept))+f"{len(nodes)}\n"
+                "#k1 k2 k3   i   j   ReH   ImH   ReS   ImS\n")
         for q in nodes:
             k=kpoints[q]
             for i in range(n):
@@ -353,7 +358,11 @@ tb-NP.dat                real-space YAeHMOP Hamiltonian and overlap S(R) in the
                          H - E_F*I, which is not a shift when S != I).
 basis_set-NP             WanTiBEXOS basis file: index species x y z [A] l m spin
 orbitals.dat             orbital index, atom, orbital, l, m (YAeHMOP order)
-hamiltonian_overlap_k.dat  H(k), S(k) at the high-symmetry points of the figure:
+hamiltonian_overlap_k.dat  H(k), S(k) at the high-symmetry points of the figure.
+                         Header as tb-NP.dat: NP / scissors / Fermi level (EHT
+                         midgap, absolute, since these H(k) are not shifted) /
+                         3 lattice vectors [A] / n orbitals / n hopping vectors
+                         (cells of tb-NP.dat) / n k points; then
                          k1 k2 k3 i j ReH ImH ReS ImS, H(k)=sum_R e^{i2pi k.R} H(R)
 yaehmop_matrices.bind    YAeHMOP input of the matrix run (K points + Dump)
 

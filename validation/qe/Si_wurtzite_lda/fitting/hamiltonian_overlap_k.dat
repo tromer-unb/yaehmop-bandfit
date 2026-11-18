@@ -1,7 +1,13 @@
-# YAeHMOP H(k) [eV] and S(k) at the high-symmetry points of the band figure
-# convention: H(k) = sum_R exp(i 2pi k.R) H(R); k in fractional reciprocal coordinates
-# H(R), S(R) for all R: tb-NP.dat ; orbitals: orbitals.dat
-# k1 k2 k3   i   j   ReH   ImH   ReS   ImS
+NP
+0.000000
+-7.288209
+3.79996863  0.00000000  0.00000000
+-1.89998432  3.29086784  0.00000000
+0.00000000  0.00000000  6.28400813
+16
+247
+8
+#k1 k2 k3   i   j   ReH   ImH   ReS   ImS
 0.00000000 0.00000000 0.49999950   1   1   -38.5326184877   0.0000000000   1.6201350231   0.0000000000
 0.00000000 0.00000000 0.49999950   1   2   -0.0000000000   0.0000000000   0.0000000000   -0.0000000000
 0.00000000 0.00000000 0.49999950   1   3   -0.0000000000   -0.0000000000   0.0000000000   0.0000000000
