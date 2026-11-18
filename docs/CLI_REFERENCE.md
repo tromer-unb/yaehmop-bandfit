@@ -177,6 +177,6 @@ Options: manifest YAML, --validate-only|--prepare-only|--fit (exactly one), --bu
 ## Spin–orbit: `USER_WORKFLOW/soc_fit.py`
 
 `--dft-dir DIR --dft-code CODE` (DFT run **with** SOC), `--from-fitting FITTINGDIR` (or `--parameters TABLE --k K`),
-`--outdir`, `--fitting-dir`, `--soc-shells "Mo:d S:p"`, `--w-split 20`, `--split-pairs 3`, `--lambda-max 1.5`,
+`--outdir`, `--fitting-dir`, `--soc-shells "Mo:d S:p"`, `--w-split 100`, `--split-pairs 3`, `--lambda-max 1.5`,
 `--points-per-segment 15`, `--emin/--emax`, `--dimension`, `--overlap-radius`. Writes `soc_parameters.txt`,
 `huckel-SOC.dat`, `basis_set-SOC` (spin up first, then spin down), figures and `fit_summary.json`.

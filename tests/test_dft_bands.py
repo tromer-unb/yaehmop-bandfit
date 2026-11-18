@@ -224,7 +224,7 @@ class ValidationFolderTests(unittest.TestCase):
                 er=eht_reference(r,8,dim)
                 self.assertTrue(er.mask.any())
     def test_soc_refused(self):
-        d=VALID/"siesta/MoS2_monolayer_soc_refused"
+        d=VALID/"siesta/MoS2_monolayer_pbe_soc"
         if d.is_dir():
             with self.assertRaisesRegex(ValueError,"spin-orbit"):read_dft_bands(d,"siesta")
 

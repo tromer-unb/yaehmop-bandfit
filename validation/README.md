@@ -27,7 +27,7 @@ number of bands, objectives) on the same references.
 | QE | `SiC_zincblende_pbe` | 3C-SiC, PBE | 3D | `sic.save/data-file-schema.xml` |
 | SIESTA | `Al2O2_bilayer_test` | Al₂O₂ bilayer (test) | 2D | `.bands` + `BandLines`, structure from `.STRUCT_OUT` |
 | SIESTA | `CNR_nanoribbon_1d_pbe` | carbon nanoribbon C₅₂H₁₆, PBE | 1D | 224 EHT orbitals |
-| SIESTA | `MoS2_monolayer_soc_refused` | MoS₂ with spin–orbit | 2D | **refused on purpose** (spin–orbit): test of the refusal |
+| SIESTA | `MoS2_monolayer_pbe_soc` | MoS₂ monolayer, PBE + SOC | 2D | `SOC_ONLY` (refused by spinless fits); SOC fit on top of the EHT of `aims/MoS2_monolayer_pbe/fitting/window-cmaes` (same cell) |
 | FHI-aims | `MoS2_monolayer_pbe` | MoS₂ monolayer, PBE | 2D | all-electron eigenvalues |
 | FHI-aims | `MoS2_monolayer_hse06_soc` | MoS₂ monolayer, HSE06 | 2D | SOC run: the `*.no_soc` band files are used |
 | VASP | `ZnI2_monolayer_pbe_soc` | ZnI₂ monolayer, PBE + SOC | 2D | `SOC_ONLY`; SOC fit on top of `ZnI2_monolayer_pbe/fitting/window-ga-basis` |

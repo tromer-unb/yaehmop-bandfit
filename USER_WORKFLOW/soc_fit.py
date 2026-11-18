@@ -68,7 +68,7 @@ def main():
     ap.add_argument("--lambda-max", type=float, default=1.5, help="upper bound of every lambda (eV)")
     ap.add_argument("--maxiter", type=int, default=60, help="differential-evolution generations")
     ap.add_argument("--seed", type=int, default=20261118)
-    ap.add_argument("--w-split", type=float, default=20.0,
+    ap.add_argument("--w-split", type=float, default=100.0,
                     help="weight of the spin-orbit splittings of the band pairs near E_F")
     ap.add_argument("--split-pairs", type=int, default=3, help="valence and conduction pairs whose splitting is fitted")
     ap.add_argument("--soc-shells", help="shells with a fitted lambda, e.g. 'Mo:d S:p' (default: d of transition "
