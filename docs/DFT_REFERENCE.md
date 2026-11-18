@@ -72,10 +72,11 @@ Every fit of `bands_fit.py` (DFT, image or CSV reference) writes, by default to
 | `parameters_huckel.txt` | `K_EHT` and every fitted variable |
 | `bands_comparison.png/pdf/csv` | fitted bands: reference **blue solid**, EHT **red dashed**; RMSE, MAE, max \|ΔE\| and gaps/gap error in the figure |
 | `bands_full_comparison.png/pdf/csv` | (DFT) all DFT and EHT bands in the `[reference] emin/emax` window |
-| `tb-NP.dat` | real-space **H(R)** and **S(R)** of YAeHMOP, plain text in the **WanTiBEXOS** non-orthogonal format (same as `siesta2wtb.py`; use `DFT= S`, `PARAMS_FILE= "tb-NP.dat"`) |
+| `huckel-NP.dat` | real-space **H(R)** and **S(R)** of YAeHMOP, plain text in the **WanTiBEXOS** non-orthogonal format (same as `siesta2wtb.py`; use `DFT= S`, `PARAMS_FILE= "huckel-NP.dat"`) |
 | `basis_set-NP` | WanTiBEXOS basis file: index, species, x y z (Å), l, m, spin |
 | `orbitals.dat` | orbital index, atom, orbital name, l, m |
-| `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points. Header as in WanTiBEXOS: `NP`, scissors, Fermi level (EHT midgap, absolute), 3 lattice vectors (Å), number of basis orbitals, number of hopping vectors (cells of `tb-NP.dat`), number of k points; then `k1 k2 k3 i j ReH ImH ReS ImS` |
+| `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points. Header as in WanTiBEXOS: `NP`, scissors, Fermi level (EHT midgap, absolute), 3 lattice vectors (Å), number of basis orbitals, number of hopping vectors (cells of `huckel-NP.dat`), number of k points; then `k1 k2 k3 i j ReH ImH ReS ImS` |
+| `POSCAR` | the structure used (VASP format; exact cell and atom order of the matrices) |
 | `yaehmop_matrices.bind` | YAeHMOP input of the matrix run (`K points` + `Dump Hamil/Overlap`) |
 | `fit_summary.json`, `README.txt` | metrics, settings, sources, checks; file description |
 
@@ -90,7 +91,7 @@ interatomic distances). `fit_summary.json` reports how well H(R), S(R) rebuild
 YAeHMOP's H(k), S(k) on the band path (≈10⁻⁷ eV; cells whose elements are all
 below 10⁻⁷ are omitted).
 
-**Energy zero of `tb-NP.dat`.** `wtb.x` diagonalizes (H(k) − E_F·I, S(k)), which
+**Energy zero of `huckel-NP.dat`.** `wtb.x` diagonalizes (H(k) − E_F·I, S(k)), which
 is not a rigid shift in a non-orthogonal basis. The file therefore holds
 H(R) − E_mid·S(R) with E_F = 0, where E_mid is the EHT midgap (`eht_midgap_eV`
 in `fit_summary.json`): `wtb.x` reproduces the YAeHMOP bands relative to midgap

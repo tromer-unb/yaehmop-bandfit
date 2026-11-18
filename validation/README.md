@@ -3,7 +3,7 @@
 One folder per DFT package and one per example. Each example holds only the
 files the reader needs (no wavefunctions, charge densities, pseudopotentials or
 POTCAR). `fitting/` inside each example has the standard fit outputs
-(parameters, comparison figures, YAeHMOP H(R)/S(R) in the WanTiBEXOS text format `tb-NP.dat` + `basis_set-NP`, and H(k)/S(k) at the high-symmetry points), produced by
+(parameters, comparison figures, YAeHMOP H(R)/S(R) in the WanTiBEXOS text format `huckel-NP.dat` + `basis_set-NP`, and H(k)/S(k) at the high-symmetry points), produced by
 
 ```bash
 ./run_validation.sh                       # settings in fit_settings.ini

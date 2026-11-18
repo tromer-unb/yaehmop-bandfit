@@ -78,13 +78,14 @@
     "eht_vbm_eV": -11.516994108869703,
     "eht_cbm_eV": -9.949201498047616,
     "eht_midgap_eV": -10.733097803458659,
-    "tb_NP_energy_zero": "H(R) in tb-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
+    "huckel_NP_energy_zero": "H(R) in huckel-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
     "high_symmetry_k_in_hamiltonian_overlap_k": 4,
     "files": [
-      "tb-NP.dat",
+      "huckel-NP.dat",
       "basis_set-NP",
       "orbitals.dat",
       "hamiltonian_overlap_k.dat"
     ]
-  }
+  },
+  "structure_in_fitting": "POSCAR"
 }

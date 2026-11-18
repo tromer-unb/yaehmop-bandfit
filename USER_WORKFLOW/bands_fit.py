@@ -257,7 +257,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     Gamma-centred mesh of (2r+1)^dim points, from which H(R) and S(R) of all
     cells within the overlap radius r are recovered exactly, and the k points
     of the figure (to check that H(R), S(R) reproduce YAeHMOP's H(k), S(k)
-    and its bands). Written for WanTiBEXOS (tb-NP.dat, basis_set-NP) and as
+    and its bands). Written for WanTiBEXOS (huckel-NP.dat, basis_set-NP) and as
     plain tables of H(k), S(k) at the high-symmetry points.
     """
     import shutil,tempfile,scipy.linalg as sl
@@ -299,7 +299,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     # wtb.x diagonalizes (H(k) - E_F*I, S(k)), which is not a rigid shift when S != I;
     # so H(R) is written as H(R) - E_mid*S(R) with E_F = 0: wtb.x then gives exactly
     # the YAeHMOP eigenvalues minus the EHT midgap (bands below 0 = occupied).
-    with open(fdir/"tb-NP.dat","w") as f:
+    with open(fdir/"huckel-NP.dat","w") as f:
         f.write(write_tb_header(0.0,cell,n,len(kept))+"#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
         for R,H,S in kept:
             r=R@cell;Hs=H-mid*S
@@ -322,7 +322,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     nodes=sorted(set(node_index or [0,len(kpoints)-1]))
     with open(fdir/"hamiltonian_overlap_k.dat","w") as f:
         # Header as in the WanTiBEXOS files (type, scissors, Fermi level, lattice
-        # vectors [A], basis size, hopping vectors of tb-NP.dat), then k points.
+        # vectors [A], basis size, hopping vectors of huckel-NP.dat), then k points.
         # H(k) here is the raw YAeHMOP one, so the Fermi level is the EHT midgap.
         f.write(write_tb_header(mid,cell,n,len(kept))+f"{len(nodes)}\n"
                 "#k1 k2 k3   i   j   ReH   ImH   ReS   ImS\n")
@@ -335,36 +335,38 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     return dict(n_orbitals=n,n_cells=len(kept),overlap_radius=int(radius),mesh_points=len(mesh),
                 max_error_rebuilt_Hk_eV=float(errH),max_error_rebuilt_Sk=float(errS),
                 eht_vbm_eV=vbm,eht_cbm_eV=cbm,eht_midgap_eV=mid,
-                tb_NP_energy_zero="H(R) in tb-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
+                huckel_NP_energy_zero="H(R) in huckel-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
                 high_symmetry_k_in_hamiltonian_overlap_k=len(nodes))
 
 FITTING_README="""Outputs of one EHT (YAeHMOP) fit (all plain text except the figures)
-================================
-parameters_huckel.dat    fitted parameters in the native YAeHMOP table format
-                         (use with: bind input.bind parameters_huckel.dat)
-parameters_huckel.txt    K_EHT and every fitted variable (name value)
-fit_summary.json         errors, gaps, optimizer, reference, structure, checks
-bands_comparison.*       fitted bands: reference blue (solid), EHT red (dashed),
-                         with RMSE / MAE / max |dE| / gap error in the figure
-bands_full_comparison.*  (DFT references) all DFT and EHT bands in a window
-tb-NP.dat                real-space YAeHMOP Hamiltonian and overlap S(R) in the
-                         WanTiBEXOS format (as siesta2wtb.py): NP / scissors /
-                         Fermi level (0) / 3 lattice vectors [A] / n orbitals /
-                         n cells / then for every cell and orbital pair:
-                         R_x R_y R_z [A]  i  j  ReH  ImH  S
-                         ReH is H(R) - E_mid*S(R) (E_mid = EHT midgap, in
-                         fit_summary.json): energies are relative to midgap and
-                         wtb.x reproduces YAeHMOP's bands exactly (wtb.x uses
-                         H - E_F*I, which is not a shift when S != I).
-basis_set-NP             WanTiBEXOS basis file: index species x y z [A] l m spin
-orbitals.dat             orbital index, atom, orbital, l, m (YAeHMOP order)
+==================================================================
+parameters_huckel.dat      fitted parameters in the native YAeHMOP table format
+                           (use with: bind input.bind parameters_huckel.dat)
+parameters_huckel.txt      K_EHT and every fitted variable (name value)
+fit_summary.json           errors, gaps, optimizer, reference, structure, checks
+bands_comparison.*         fitted bands: reference blue (solid), EHT red (dashed),
+                           with RMSE / MAE / max |dE| / gap error in the figure
+                           (.png, .pdf; .csv with the curves)
+bands_full_comparison.*    (DFT references) all DFT and EHT bands in a window
+huckel-NP.dat              real-space Hamiltonian H(R) and overlap S(R) in the
+                           WanTiBEXOS format (as siesta2wtb.py; DFT= S):
+                           NP / scissors / Fermi level (0) / 3 lattice vectors [A] /
+                           n orbitals / n hopping vectors (cells) / then for every
+                           cell and orbital pair: R_x R_y R_z [A]  i  j  ReH  ImH  S.
+                           ReH is H(R) - E_mid*S(R) (E_mid = EHT midgap, in
+                           fit_summary.json), so energies are relative to midgap and
+                           wtb.x reproduces YAeHMOP's bands (wtb.x uses H - E_F*I,
+                           which is not a shift when S != I).
+basis_set-NP               WanTiBEXOS basis file: index species x y z [A] l m spin
+orbitals.dat               orbital index, atom, orbital, l, m (YAeHMOP order)
 hamiltonian_overlap_k.dat  H(k), S(k) at the high-symmetry points of the figure.
-                         Header as tb-NP.dat: NP / scissors / Fermi level (EHT
-                         midgap, absolute, since these H(k) are not shifted) /
-                         3 lattice vectors [A] / n orbitals / n hopping vectors
-                         (cells of tb-NP.dat) / n k points; then
-                         k1 k2 k3 i j ReH ImH ReS ImS, H(k)=sum_R e^{i2pi k.R} H(R)
-yaehmop_matrices.bind    YAeHMOP input of the matrix run (K points + Dump)
+                           Header as huckel-NP.dat (Fermi level = EHT midgap,
+                           absolute, since these H(k) are not shifted) plus the
+                           number of k points; then k1 k2 k3 i j ReH ImH ReS ImS,
+                           with H(k) = sum_R exp(i 2pi k.R) H(R)
+yaehmop_matrices.bind      YAeHMOP input of the matrix run (K points + Dump)
+POSCAR                     the structure used (VASP format, exact cell of huckel-NP.dat)
+README.txt                 this description
 
 H(R), S(R) are recovered exactly from YAeHMOP's H(k), S(k) on the full
 (2r+1)^dim mesh (r = overlap radius); fit_summary.json reports how well they
@@ -401,10 +403,14 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
               "bands_full_comparison.png","bands_full_comparison.pdf","bands_full_comparison.csv"):
         if (Path(outdir)/f).is_file() and Path(outdir).resolve()!=fdir.resolve():
             shutil.copy(Path(outdir)/f,fdir/f)
-    for old_file in ("hamiltonian_overlap.npz",):
+    for old_file in ("hamiltonian_overlap.npz","tb-NP.dat"):
         if (fdir/old_file).exists():(fdir/old_file).unlink()
+    # The structure used (exact cell of huckel-NP.dat), so that fitting/ is self-contained
+    from ase.io import write as ase_write
+    ase_write(fdir/"POSCAR",read_structure(structure,sfmt),format="vasp",direct=True)
     info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index)
-    summary=dict(summary,tight_binding_files=dict(info,files=["tb-NP.dat","basis_set-NP","orbitals.dat",
+    summary=dict(summary,structure_in_fitting="POSCAR",
+                 tight_binding_files=dict(info,files=["huckel-NP.dat","basis_set-NP","orbitals.dat",
                                                               "hamiltonian_overlap_k.dat"]))
     summary=portable_paths(json.loads(json.dumps(summary,default=str)),fdir)
     (fdir/"fit_summary.json").write_text(json.dumps(summary,indent=2)+"\n")
