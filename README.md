@@ -58,6 +58,8 @@ python3 quick.py
 
 Provide **structure.cif** + **bands.png** (or exact numeric CSV), edit one **file.ini** containing the plot energy limits and **correct reciprocal path**, and run:
 
+> Instead of a CIF you can give the structure file of **VASP** (POSCAR/CONTCAR/OUTCAR/vasprun.xml), **Quantum ESPRESSO** (pw.x input, any `ibrav`, or output), **SIESTA** (.fdf/.XV/.STRUCT_OUT) or **FHI-aims** (geometry.in/output); the format is detected automatically. See [structure formats](docs/STRUCTURE_FORMATS.md).
+
 ~~~bash
 # Working directory: cloned repository root
 mkdir -p inputs/my_material

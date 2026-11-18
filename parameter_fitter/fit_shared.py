@@ -6,7 +6,7 @@ import argparse, copy, csv, json, sys, time
 
 import numpy as np
 import yaml
-from ase.io import read
+from structure_io import read_structure, normalize_structure_format
 from scipy.optimize import differential_evolution, minimize
 
 HERE = Path(__file__).resolve().parent
@@ -62,6 +62,10 @@ def validate_schema(shared, systems):
             raise ValueError(f"System {s['name']}: require emin < emax")
         if len(s["labels"]) != len(s["symmetry_points"]):
             raise ValueError(f"System {s['name']}: labels/points length mismatch")
+        try:
+            normalize_structure_format(s.get("structure_format", shared.get("structure_format")))
+        except ValueError as exc:
+            raise ValueError(f"System {s['name']}: {exc}") from None
         names.append(str(s["name"]))
     if len(names) != len(set(names)):
         raise ValueError("System names must be unique")
@@ -84,7 +88,8 @@ def prepare_system(entry, base, defaults, shared):
     name = str(entry["name"])
     cif = resolve_relative(base, entry["structure"])
     image = resolve_relative(base, entry["reference"])
-    atoms = read(cif)
+    structure_format = entry.get("structure_format", shared.get("structure_format"))
+    atoms = read_structure(cif, structure_format)
     symbols = atoms.get_chemical_symbols()
     elements = list(dict.fromkeys(s.capitalize() for s in symbols))
     params = subset_params(defaults, elements)
@@ -137,6 +142,7 @@ def prepare_system(entry, base, defaults, shared):
 
     return {"name": name, "role": str(entry.get("role", "train")).lower(),
             "weight": float(entry.get("weight", 1.0)), "cif": cif,
+            "structure_format": structure_format,
             "image": image, "atoms": atoms, "symbols": symbols,
             "elements": elements, "norb": norb, "nelec": nelec,
             "nocc": nocc, "path": path, "xcoord": xcoord, "T": T,
@@ -202,7 +208,8 @@ def main():
     base = cfg_path.parent
     all_elements = []
     for s in entries:
-        atoms = read(resolve_relative(base, s["structure"]))
+        atoms = read_structure(resolve_relative(base, s["structure"]),
+                               s.get("structure_format", shared.get("structure_format")))
         for sym in atoms.get_chemical_symbols():
             el = sym.capitalize()
             if el not in all_elements:
@@ -250,7 +257,8 @@ def main():
         write_parameter_file(parm, ps)
         write_periodic_input_generic(system["cif"], inp, system["path"], K, True, system["nelec"],
                                      overlap_images=system["overlap_images"],
-                                     periodic_dim=system["periodic_dim"])
+                                     periodic_dim=system["periodic_dim"],
+                                     structure_format=system["structure_format"])
         run_bind(BIND, inp, parm, log)
         _, model = parse_band(str(inp) + ".band")
         if model.shape != system["T"].shape or not np.isfinite(model).all():

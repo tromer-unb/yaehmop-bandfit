@@ -15,7 +15,7 @@ with an optional local polish (Nelder-Mead or Powell) inside the budget.
 from pathlib import Path
 import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
-from ase.io import read
+from structure_io import read_structure,resolved_structure_format
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -35,7 +35,8 @@ from global_optimizers import run_global,GLOBAL_METHODS,POLISH_METHODS
 def parse_sample(e,root,defaults,shared):
     cif=(root/e["structure"]).resolve()
     png=(root/e["reference"]).resolve()
-    atoms=read(cif);syms=atoms.get_chemical_symbols()
+    sfmt=e.get("structure_format",shared.get("structure_format"))
+    atoms=read_structure(cif,sfmt);syms=atoms.get_chemical_symbols()
     params={k:defaults[k] for k in set(syms)}
     norb=orbital_count(params,syms)
     nelec=valence_electrons(params,syms)
@@ -82,14 +83,15 @@ def parse_sample(e,root,defaults,shared):
     return dict(name=e["name"],cif=cif,png=png,symbols=syms,
       elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=nocc,
       path=path,kx=kx,target=target,n_pairs=n_pairs,gap=tc-tv,weight=float(e.get("weight",1.)),
-      periodic_dim=dim,overlap_images=images,
+      periodic_dim=dim,overlap_images=images,structure_format=sfmt,
       png_hash=hashlib.sha256(png.read_bytes()).hexdigest(),
       cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
 
 def write_sample_input(s,inp,k):
     """Native periodic input for one sample, honouring its dimensionality."""
     return write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"],
-        overlap_images=s["overlap_images"],periodic_dim=s["periodic_dim"])
+        overlap_images=s["overlap_images"],periodic_dim=s["periodic_dim"],
+        structure_format=s.get("structure_format"))
 
 def scores(bands,s):
     n=s["nocc"]
@@ -124,7 +126,7 @@ class Fitter:
         if not self.train_entries:raise ValueError("Need at least one training system")
         elements=[]
         for e in self.train_entries:
-            for el in read((base/e["structure"]).resolve()).get_chemical_symbols():
+            for el in read_structure((base/e["structure"]).resolve(),e.get("structure_format",config.get("structure_format"))).get_chemical_symbols():
                 if el not in elements:elements.append(el)
         self.elements=elements
         self.bind,table=resolve_yaehmop_assets()
@@ -179,7 +181,7 @@ class Fitter:
         if withheld:
             # Heldout CIF and PNG are opened ONLY after the optimizer freezes x.
             for e in self.test_entries:
-                ats=read((self.base/e["structure"]).resolve())
+                ats=read_structure((self.base/e["structure"]).resolve(),e.get("structure_format",self.conf.get("structure_format")))
                 if not set(ats.get_chemical_symbols()).issubset(self.elements):
                     raise ValueError("Unseen test elements cannot be transferred")
                 specs.append(parse_sample(e,self.base,self.stockparams,self.conf))
@@ -345,7 +347,9 @@ def main():
       overlap_radius=int(config.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)),
       lattice={s["name"]:dict(periodic_dim=s["periodic_dim"],
                               overlap_images=list(s["overlap_images"]))
-               for s in f.train})
+               for s in f.train},
+      structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
+                         for s in f.train})
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

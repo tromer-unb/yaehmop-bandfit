@@ -18,6 +18,8 @@ cp /caminho/da/imagem/bands.png inputs/MoS2/bands.png
 cp examples/configs/material_2bands_template.ini inputs/MoS2/file.ini
 ~~~
 
+No lugar do CIF pode ser usado o arquivo de estrutura do **VASP** (POSCAR/CONTCAR/OUTCAR/vasprun.xml), do **Quantum ESPRESSO** (entrada do pw.x com qualquer `ibrav`, ou saída), do **SIESTA** (.fdf/.XV/.STRUCT_OUT) ou do **FHI-aims** (geometry.in/saída). O formato é detectado sozinho; para forçar, use `--structure-format`. Detalhes em [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md).
+
 Edite **inputs/MoS2/file.ini**. Ele deve conter os limites de energia da sua imagem (**emin**, **emax**), **a trajetória real no espaço recíproco** do seu cálculo DFT, os rótulos e **n_pairs**. O template usa Γ–M–K–Γ e −6/+6 eV **como exemplo, não como informação determinada automaticamente de todo CIF**.
 
 Para calcular espectros EHT de verdade, instale o **YAeHMOP original** separadamente e indique seus próprios caminhos:

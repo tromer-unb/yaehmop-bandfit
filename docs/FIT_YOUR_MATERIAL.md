@@ -4,7 +4,7 @@
 
 What you provide:
 
-- **structure.cif** — your material's structure (MoS2, WS2, GeSe, etc.).
+- **structure.cif** — your material's structure (MoS2, WS2, GeSe, etc.). A VASP POSCAR/CONTCAR, Quantum ESPRESSO pw.x input/output, SIESTA .fdf/.XV/.STRUCT_OUT or FHI-aims geometry.in works too: see [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md).
 - **bands.png** — its reference DFT band plot, with known energy-axis limits and reciprocal path. Prefer a numeric CSV if available.
 - **file.ini** — a small configuration specifying the energy axis, k path, and number of selected bands.
 

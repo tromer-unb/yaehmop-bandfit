@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""User-facing original-YAeHMOP CIF + PNG fitter, figure writer and band runner.
+"""User-facing original-YAeHMOP structure + PNG fitter, figure writer and band runner.
 
 python3 bands_fit.py MoS2.cif file.txt --png MoS2.png --outdir runs/mos2
 python3 bands_fit.py MoS2.cif file.txt --from-fit runs/mos2/fit/fit.json
 python3 bands_fit.py MoS2.cif file.txt --from-parameters parameters.dat --k 1.75
 
 file.txt is ordinary INI with [reference], [band_path], [fit] sections.
+The structure may be a CIF or a VASP (POSCAR/CONTCAR/OUTCAR/vasprun.xml),
+Quantum ESPRESSO (pw.x input/output), SIESTA (.fdf/.XV/.STRUCT_OUT) or
+FHI-aims (geometry.in/output) file; see --structure-format.
 This is a standalone frontend, NOT a new approximate Hamiltonian.
 """
 from pathlib import Path
 import argparse,configparser,csv,hashlib,json,os,subprocess,sys
 import numpy as np
 import yaml
-from ase.io import read
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -26,6 +28,8 @@ from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
    DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from fit_from_image import parse_points
 from global_optimizers import GLOBAL_METHODS,POLISH_METHODS
+from structure_io import (read_structure,resolved_structure_format,structure_label,
+   STRUCTURE_FORMAT_CHOICES,STRUCTURE_FORMAT_HELP)
 
 def csv_path(x,base):
     p=Path(os.path.expandvars(os.path.expanduser(x)))
@@ -112,11 +116,12 @@ def plot_full(k,E,out,*,name,nocc,emin=-6,emax=6):
           "note":"PNG/PDF only show the near-gap region; CSV/NPZ preserve all physical eigenvalues."}
     (out/"bands_full_plot_info.json").write_text(json.dumps(meta,indent=2)+"\n")
 
-def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADIUS):
+def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADIUS,
+              structure_format=None):
     """Recompute physical YAeHMOP eigenbands WITHOUT using any target pixels."""
     bind,_=resolve_yaehmop_assets()
     p=parse_parameter_table(parameters)
-    atoms=read(cif)
+    atoms=read_structure(cif,structure_format)
     symbols=atoms.get_chemical_symbols()
     params=subset_for_elements(p,list(dict.fromkeys(symbols)))
     nelec=valence_electrons(params,symbols)
@@ -131,7 +136,8 @@ def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADI
     logfile=outdir/"recompute.log"
     overlap=overlap_images_for(dim,overlap_radius)
     write_periodic_input_generic(cif,inp,bandpath,float(K),True,nelec,
-                                 overlap_images=overlap,periodic_dim=dim)
+                                 overlap_images=overlap,periodic_dim=dim,
+                                 structure_format=structure_format)
     run_bind(bind,inp,parameters,logfile)
     _,E=parse_band(str(inp)+".band")
     coords=[]
@@ -142,8 +148,7 @@ def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADI
     if E.shape!=(len(k),norb):raise ValueError("YAeHMOP band table dimension mismatch")
     ymin=config["reference"].getfloat("emin",fallback=-6.)
     ymax=config["reference"].getfloat("emax",fallback=6.)
-    plot_full(k,E,outdir,name=(cif.parent.name if cif.stem.lower()=="structure"
-                                  else cif.stem),nocc=nocc,emin=ymin,emax=ymax)
+    plot_full(k,E,outdir,name=structure_label(cif),nocc=nocc,emin=ymin,emax=ymax)
     np.savez_compressed(outdir/"bands_full.npz",k=k,energies=E,nocc=nocc)
     print("RECOMPUTED",len(k),"k points,",norb,
           "physical YAeHMOP eigenvalues per k from",parameters)
@@ -152,7 +157,10 @@ def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADI
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cif",type=Path,help="CIF crystal structure")
+    parser.add_argument("cif",type=Path,
+                        help="crystal structure: CIF, VASP, Quantum ESPRESSO, SIESTA or FHI-aims file")
+    parser.add_argument("--structure-format",choices=STRUCTURE_FORMAT_CHOICES,default="auto",
+                        help=STRUCTURE_FORMAT_HELP)
     parser.add_argument("input_file",type=Path,help="Plain INI file.txt (axis, path, optimizer settings)")
     parser.add_argument("--image","--png",dest="png",type=Path,
                         help="Any Pillow-decodable static raster or CSV overriding [reference] image; --png is a legacy alias")
@@ -188,7 +196,13 @@ def main():
     args=parser.parse_args()
     cif=args.cif.resolve()
     inputs=args.input_file.resolve()
-    if not cif.is_file():parser.error("CIF not found: "+str(cif))
+    if not cif.is_file():parser.error("Structure file not found: "+str(cif))
+    try:
+        sfmt=resolved_structure_format(cif,args.structure_format)
+        read_structure(cif,sfmt)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print("STRUCTURE",cif,"format",sfmt,file=sys.stderr,flush=True)
     config=conf(inputs)
     dim,nodes,labels,step=read_nodes(config)
     fit=config["fit"];ref=config["reference"]
@@ -218,12 +232,12 @@ def main():
         if len(files)==1:
             record=next(iter(files.values()))
             if record["cif"]!=hashlib.sha256(cif.read_bytes()).hexdigest():
-                raise ValueError("CIF SHA256 differs from original fit; refusing silent substitution")
-        recompute(cif,config,native,saved_K,outdir,radius)
+                raise ValueError("Structure-file SHA256 differs from original fit; refusing silent substitution")
+        recompute(cif,config,native,saved_K,outdir,radius,sfmt)
         return
     if args.from_parameters:
         if args.k is None:parser.error("--k is required with --from-parameters")
-        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,radius)
+        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,radius,sfmt)
         return
     image=args.png
     if image is None:
@@ -259,7 +273,7 @@ def main():
         else:
             from prepare_band_png import csv_curves
             csv_curves(image,2*pairs,emin,emax)
-        print(json.dumps(dict(cif=str(cif),image=str(image),band_count=2*pairs,
+        print(json.dumps(dict(cif=str(cif),structure_format=sfmt,image=str(image),band_count=2*pairs,
             high_symmetry_labels=labels,points=nodes,energy_limits=[emin,emax],
             optimizer=optimizer,budget=budget,image_mode=mode,
             raster_ingest=rasterqa,
@@ -273,7 +287,7 @@ def main():
         return
     # Name identifies system; source paths absolute for reproducibility
     name=(args.name or fit.get("name",fallback=None) or
-          (cif.parent.name if cif.stem.lower()=="structure" else cif.stem))
+          structure_label(cif))
     if not name or any(c in name for c in ("/","\\","..")):
         raise ValueError("Material name must not contain slash or '..'")
     yml={"n_pairs":pairs,"points_per_line":step,"trace_nx":nx,
@@ -283,7 +297,7 @@ def main():
          "reg_weight":float(fit.get("reg_weight",".04")),
          "systems":[{
              "name":name,"role":"train","weight":1.0,
-             "structure":str(cif),"reference":str(prepared),
+             "structure":str(cif),"structure_format":sfmt,"reference":str(prepared),
              "emin":float(emin),"emax":float(emax),
              "point_dim":dim,"symmetry_points":nodes,
              "labels":labels,"n_pairs":pairs,
@@ -329,7 +343,8 @@ def main():
     if abs(objective_rmse-float(met["selected_rmse_eV"]))>1.e-8:
         raise ValueError("Physical DFT/EHT figure disagrees with optimizer metric")
     status={
-        "cif":str(cif),"cif_sha256":hashlib.sha256(cif.read_bytes()).hexdigest(),
+        "cif":str(cif),"structure_format":sfmt,
+        "cif_sha256":hashlib.sha256(cif.read_bytes()).hexdigest(),
         "reference_input":str(image),"input_sha256":hashlib.sha256(image.read_bytes()).hexdigest(),
         "extraction":qa,"n_pairs":pairs,"n_scored_bands":2*pairs,
         "optimizer_evaluations":state["objective_evaluations"],

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""One shared EHT vector from several gapped CIF+PNG/CSV sources (2/4/6/8 bands).
+"""One shared EHT vector from several gapped structure+PNG/CSV sources (2/4/6/8 bands).
+
+Each system's "structure" may be a CIF, VASP, Quantum ESPRESSO, SIESTA or
+FHI-aims file (optional per-system "structure_format" forces the format).
 
 Training images only are prepared and opened before parameters are frozen;
 withheld reference images are used *only after* fitting, to score genuine
@@ -9,13 +12,13 @@ from __future__ import annotations
 import argparse,hashlib,json,subprocess,sys
 from pathlib import Path
 import yaml
-from ase.io import read
 from bands_fit import conf,read_nodes,csv_path
 from prepare_band_png import prepare,parse_bbox
 from frozen_transfer import evaluate,sha
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'parameter_fitter'))
 from yaehmop_generic import DEFAULT_OVERLAP_RADIUS
+from structure_io import read_structure,resolved_structure_format
 
 def load_manifest(path):
     path=Path(path).resolve()
@@ -38,13 +41,14 @@ def load_manifest(path):
         cif=(path.parent/str(row['structure'])).resolve()
         ini=(path.parent/str(row['settings'])).resolve()
         if not cif.is_file() or not ini.is_file():
-            raise FileNotFoundError('CIF/INI missing for '+name)
+            raise FileNotFoundError('Structure/INI missing for '+name)
         cfg=conf(ini);read_nodes(cfg)
         img=(path.parent/str(row['reference'])).resolve() if row.get('reference') else csv_path(cfg['reference'].get('image',''),ini.parent)
         if not img.is_file():raise FileNotFoundError('Reference missing for '+name+': '+str(img))
-        symbols=read(cif).get_chemical_symbols()
+        sfmt=resolved_structure_format(cif,row.get('structure_format'))
+        symbols=read_structure(cif,sfmt).get_chemical_symbols()
         ref=cfg['reference']
-        entry={'name':name,'role':role,'cif':cif,'ini':ini,'cfg':cfg,
+        entry={'name':name,'role':role,'cif':cif,'structure_format':sfmt,'ini':ini,'cfg':cfg,
                'image':img,'symbols':symbols,'weight':float(row.get('weight',1.0)),
                'image_mode':str(row.get('mode',ref.get('mode','auto'))),
                'bbox':row.get('bbox',ref.get('bbox',fallback=None)),
@@ -59,7 +63,7 @@ def load_manifest(path):
     thashes={sha(s['cif']) for s in train}
     for s in test:
         if sha(s['cif']) in thashes:
-            raise ValueError('Heldout CIF is identical to a training CIF: '+s['name'])
+            raise ValueError('Heldout structure file is identical to a training one: '+s['name'])
     return path,a,train,test
 
 def preparation(row,out,pairs):
@@ -72,7 +76,7 @@ def preparation(row,out,pairs):
         min_coverage=ref.getfloat('min_coverage',fallback=.75))
     dim,nodes,labels,step=read_nodes(row['cfg'])
     return {'name':row['name'],'role':'train','weight':row['weight'],
-       'structure':str(row['cif']),'reference':str(prepared),
+       'structure':str(row['cif']),'structure_format':row['structure_format'],'reference':str(prepared),
        'emin':float(ref['emin']),'emax':float(ref['emax']),
        'point_dim':dim,'symmetry_points':nodes,'labels':labels,
        'n_pairs':pairs,'image_mode':'colored','points_per_line':step,
@@ -161,7 +165,7 @@ def main():
         results[s['name']]=evaluate(s['cif'],s['ini'],s['image'],
             native,K,out/'heldout'/s['name'],pairs,
             mode=s['image_mode'],bbox=s['bbox'],colors=s['colors'],
-            overlap_radius=radius,source=frozen)
+            overlap_radius=radius,source=frozen,structure_format=s['structure_format'])
     report.update({'parameters_sha256':sha(native),'K_EHT':K,
         'shared_source_summary':str(out/'shared_frozen_source.json'),
         'test_references_opened_only_after_fit':True,

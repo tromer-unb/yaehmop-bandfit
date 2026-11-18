@@ -97,7 +97,7 @@
 
 YAeHMOP BandFit adjusts the atomic parameters of the \textbf{extended H\"uckel theory} (EHT) so that the
 band structure computed by the original YAeHMOP solver reproduces a reference band structure, usually from
-DFT. You give a crystal structure (CIF), the reference bands (an image or a numerical CSV) and a small INI
+DFT. You give a crystal structure (CIF, or a VASP, Quantum ESPRESSO, SIESTA or FHI-aims file), the reference bands (an image or a numerical CSV) and a small INI
 settings file. The program returns:
 
 \begin{itemize}[nosep]
@@ -226,6 +226,38 @@ evaluation and recomputation of bands run it. GitHub Actions run only the light 
 
 % ================================================================ 3
 \section{Inputs}
+
+\subsection{Crystal structure}\label{sec:structure}
+
+The structure can be a CIF or the structure file of one of four DFT packages. The format is detected from
+the file name and, when that is not conclusive, from the content; \cmd{--structure-format} forces it
+(\cmd{structure\_format:} in YAML manifests, per system or under \cmd{shared:}). The same crystal gives the
+same YAeHMOP input in every format (tested to $10^{-6}$ against the CIF, including real YAeHMOP runs).
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L >{\ttfamily}l}
+\toprule
+Package & Files & \normalfont\cmd{--structure-format} \\
+\midrule
+--- & \cmd{*.cif} & cif \\
+VASP & \cmd{POSCAR}, \cmd{CONTCAR}, \cmd{*.vasp}; \cmd{OUTCAR}; \cmd{vasprun.xml} & vasp, vasp-out, vasp-xml \\
+Quantum ESPRESSO & pw.x input (\cmd{*.pwi}, \cmd{*.in}, any \cmd{ibrav}); output (\cmd{*.pwo}) & qe, qe-out \\
+SIESTA & \cmd{*.fdf}; \cmd{*.XV}; \cmd{*.STRUCT\_OUT} & siesta, siesta-xv, siesta-struct-out \\
+FHI-aims & \cmd{geometry.in}; output & aims, aims-out \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+ASE does the parsing, except where it cannot: the SIESTA \cmd{.fdf} (\cmd{LatticeConstant},
+\cmd{LatticeVectors} or \cmd{LatticeParameters}, \cmd{ChemicalSpeciesLabel}, all
+\cmd{AtomicCoordinatesFormat} values, \cmd{AtomicCoordinatesAndAtomicSpecies}, \cmd{\%include}) and the
+pw.x lattice for $\text{ibrav}\neq 0$ (vectors as in QE \cmd{latgen}, from \cmd{celldm} or
+\cmd{A}, \cmd{B}, \cmd{C}, \cmd{cosAB}\ldots) are read by \cmd{parameter\_fitter/structure\_io.py}. Output
+files give the last (relaxed) geometry. The file must contain a full $3\times3$ cell (vacuum vector included
+for 2D/1D materials), and the \cmd{[band\_path]} points refer to \emph{its} reciprocal vectors.
+Z-matrix and ghost atoms in SIESTA and \cmd{crystal\_sg} in QE are not supported. Details in
+\cmd{docs/STRUCTURE\_FORMATS.md}.
 
 \subsection{The settings file (INI)}
 
@@ -647,7 +679,8 @@ extensions (graphene, phagraphene, diamond, graphite) use other PBE sources and 
 \toprule
 \normalfont Flag & Meaning \\
 \midrule
-cif, input\_file & structure and INI settings (positional) \\
+cif, input\_file & structure (any format of section~\ref{sec:structure}) and INI settings (positional) \\
+--structure-format & force the structure format (default \cmd{auto}) \\
 --image, --png & reference image or CSV instead of \cmd{[reference] image} \\
 --pairs \{1,2,3,4\} & valence and conduction bands on \emph{each} side \\
 --mode & \cmd{auto}, \cmd{layered}, \cmd{colors}, \cmd{mono}, \cmd{csv} \\

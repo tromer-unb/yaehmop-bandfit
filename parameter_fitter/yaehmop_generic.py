@@ -111,10 +111,11 @@ def write_parameter_file(path,params):
     Path(path).write_text('\n'.join(lines)+'\n')
     return Path(path)
 
-def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2):
-    from ase.io import read
+def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2,structure_format=None):
+    """cif_path: any structure file read by structure_io (CIF, VASP, QE, SIESTA, FHI-aims)."""
+    from structure_io import read_structure
     cif_path,out_path=Path(cif_path),Path(out_path)
-    atoms=read(cif_path); frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
+    atoms=read_structure(cif_path,structure_format); frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
     if periodic_dim not in (1,2,3):
         raise ValueError("periodic_dim must be 1, 2, or 3")
     if len(overlap_images)!=3 or any(int(v)<0 for v in overlap_images):

@@ -5,9 +5,11 @@ This is a deterministic rules-based guide from user-declared task, not a
 validated automatic structure/PNG classifier or optimizer selector.
 """
 from __future__ import annotations
-import argparse,json
+import argparse,json,sys
 from pathlib import Path
-from ase.io import read
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'parameter_fitter'))
+from structure_io import (read_structure,resolved_structure_format,
+   STRUCTURE_FORMAT_CHOICES,STRUCTURE_FORMAT_HELP)
 
 def recommendation(*,goal='direct',electronic='unknown',bands='auto',
                    phase='unknown',elements=(),has_reference=False):
@@ -55,7 +57,9 @@ def recommendation(*,goal='direct',electronic='unknown',bands='auto',
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--cif',type=Path,required=True)
+    p.add_argument('--cif','--structure',dest='cif',type=Path,required=True,
+                   help='crystal structure: CIF, VASP, Quantum ESPRESSO, SIESTA or FHI-aims file')
+    p.add_argument('--structure-format',choices=STRUCTURE_FORMAT_CHOICES,default='auto',help=STRUCTURE_FORMAT_HELP)
     p.add_argument('--reference',type=Path,help='PNG/CSV path; existence checked only (not parsed)')
     p.add_argument('--goal',choices=('direct','transfer'),default='direct')
     p.add_argument('--electronic',choices=('semiconductor','metal','unknown'),default='unknown')
@@ -63,14 +67,18 @@ def main():
     p.add_argument('--bands',choices=('auto','2','4','6','8'),default='auto')
     p.add_argument('--outdir',type=Path,default=Path('outputs/advice'))
     a=p.parse_args()
-    if not a.cif.is_file():p.error('CIF does not exist')
+    if not a.cif.is_file():p.error('Structure file does not exist')
     if a.reference and not a.reference.is_file():p.error('Reference file does not exist')
-    atoms=read(a.cif)
-    if len(atoms)==0:p.error('CIF contains no atoms')
+    try:
+        sfmt=resolved_structure_format(a.cif,a.structure_format)
+        atoms=read_structure(a.cif,sfmt)
+    except ValueError as exc:
+        p.error(str(exc))
     info=recommendation(goal=a.goal,electronic=a.electronic,
         phase=a.phase,bands=a.bands,elements=atoms.get_chemical_symbols(),
         has_reference=a.reference is not None)
     info['cif']=str(a.cif.resolve())
+    info['structure_format']=sfmt
     info['reference']=str(a.reference.resolve()) if a.reference else None
     a.outdir.mkdir(parents=True,exist_ok=True)
     path=a.outdir/'recommendation.json'

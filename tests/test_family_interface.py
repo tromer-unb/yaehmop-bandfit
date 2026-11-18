@@ -43,7 +43,7 @@ class FamilyInterface(unittest.TestCase):
    m=yaml.safe_load(yml.read_text())
    m['systems'][2]['structure']=m['systems'][0]['structure']
    yml.write_text(yaml.safe_dump(m))
-   with self.assertRaisesRegex(ValueError,'identical to a training CIF'):
+   with self.assertRaisesRegex(ValueError,'identical to a training'):
     fm.load_manifest(yml)
  def test_family_prepare_train_only(self):
   with tempfile.TemporaryDirectory() as tmp:

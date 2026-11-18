@@ -10,7 +10,8 @@ python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini [options]
 
 | Flag | Meaning and runtime |
 |---|---|
-| `cif` (positional) | Crystal structure in CIF format (required). |
+| `cif` (positional) | Crystal structure (required): CIF, VASP, Quantum ESPRESSO, SIESTA or FHI-aims file; see [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md). |
+| `--structure-format FMT` | Force the structure format instead of auto-detection: `cif`, `vasp`, `vasp-out`, `vasp-xml`, `qe`, `qe-out`, `siesta`, `siesta-xv`, `siesta-struct-out`, `aims`, `aims-out` (default `auto`). Also in `frozen_transfer.py`, `strategy_advisor.py` (which accepts `--structure` as an alias of `--cif`) and `fit_from_image.py`; YAML manifests take `structure_format:` per system or under `shared:`. |
 | `input_file` (positional) | INI settings file with `[reference]`, `[band_path]`, `[fit]` (required). |
 | `--image PATH`, `--png PATH` | Supply raster or CSV bands instead of INI `[reference] image`; `--png` is the backward-compatible alias. |
 | `--name NAME` | Label for output and fitted material; no path separators. |
