@@ -1,0 +1,18 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  Ti1      s            0  0
+     2  Ti1      px           1  1
+     3  Ti1      py           1 -1
+     4  Ti1      pz           1  0
+     5  Ti1      dx2-y2       2  2
+     6  Ti1      dz2          2  0
+     7  Ti1      dxy          2 -2
+     8  Ti1      dxz          2  1
+     9  Ti1      dyz          2 -1
+    10  Br2      s            0  0
+    11  Br2      px           1  1
+    12  Br2      py           1 -1
+    13  Br2      pz           1  0
+    14  Br3      s            0  0
+    15  Br3      px           1  1
+    16  Br3      py           1 -1
+    17  Br3      pz           1  0

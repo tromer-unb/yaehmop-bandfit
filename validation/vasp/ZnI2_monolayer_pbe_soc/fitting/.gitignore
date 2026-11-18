@@ -1,0 +1,6 @@
+# Spin-orbit fits go to the repository; matrix files > 10 MB stored as .gz
+*
+!.gitignore
+!soc-*/
+!soc-*/**
+soc-from-window-ga-basis/huckel-SOC.dat

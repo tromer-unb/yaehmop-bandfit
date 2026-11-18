@@ -1,0 +1,13 @@
+# Only the two best protocols (and spin-orbit fits) go to the repository;
+# the other protocol folders stay local.
+*
+!.gitignore
+!window-ga-basis/
+!window-ga-basis/**
+!window-ga/
+!window-ga/**
+# large matrix files are stored compressed (.gz); the plain files stay local
+window-ga-basis/hamiltonian_overlap_k.dat
+window-ga-basis/huckel-NP.dat
+window-ga/hamiltonian_overlap_k.dat
+window-ga/huckel-NP.dat

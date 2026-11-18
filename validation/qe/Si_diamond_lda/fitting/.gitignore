@@ -1,0 +1,10 @@
+# Only the two best protocols (and spin-orbit fits) go to the repository;
+# the other protocol folders stay local.
+*
+!.gitignore
+!window-ga-basis/
+!window-ga-basis/**
+!frontier-de/
+!frontier-de/**
+# large matrix files are stored compressed (.gz); the plain files stay local
+window-ga-basis/huckel-NP.dat

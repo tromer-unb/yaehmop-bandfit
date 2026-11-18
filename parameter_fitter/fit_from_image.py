@@ -4,13 +4,14 @@ from pathlib import Path
 import argparse,copy,csv,json,sys,time
 import numpy as np
 from scipy.optimize import differential_evolution,minimize
-from ase.io import read
 
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from yaehmop_generic import (parse_parameter_table,subset_for_elements,orbital_count,valence_electrons,
-    write_parameter_file,write_periodic_input_generic,BandPath,run_bind,parse_band,normalized_path_coordinate,resolve_yaehmop_assets)
+    write_parameter_file,write_periodic_input_generic,BandPath,run_bind,parse_band,normalized_path_coordinate,resolve_yaehmop_assets,
+    DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from image_target import load_band_image,energies_at_x,image_gap
+from structure_io import read_structure,resolved_structure_format,STRUCTURE_FORMAT_CHOICES,STRUCTURE_FORMAT_HELP
 
 
 
@@ -68,21 +69,24 @@ def image_shape_metrics(target,xcoord,M_aligned):
 
 def main():
     ap=argparse.ArgumentParser(description='Generic YAeHMOP parameter fitting from a band-structure image.')
-    ap.add_argument('cif'); ap.add_argument('image')
+    ap.add_argument('cif',help='crystal structure: CIF, VASP, Quantum ESPRESSO, SIESTA or FHI-aims file'); ap.add_argument('image')
+    ap.add_argument('--structure-format',choices=STRUCTURE_FORMAT_CHOICES,default='auto',help=STRUCTURE_FORMAT_HELP)
     ap.add_argument('--emin',type=float,required=True); ap.add_argument('--emax',type=float,required=True); ap.add_argument('--fermi',type=float,default=0.0)
-    ap.add_argument('--symmetry-points','--symetry-points',dest='symmetry_points',type=float,nargs='+',required=True); ap.add_argument('--point-dim',type=int,choices=(1,2,3),default=2)
+    ap.add_argument('--symmetry-points','--symetry-points',dest='symmetry_points',type=float,nargs='+',required=True); ap.add_argument('--point-dim',type=int,choices=(1,2,3),default=2,help='k-point AND lattice periodicity (3 for bulk crystals)')
+    ap.add_argument('--overlap-radius',type=int,default=DEFAULT_OVERLAP_RADIUS)
     ap.add_argument('--labels',nargs='+',required=True); ap.add_argument('--points-per-line',type=int,default=30)
     ap.add_argument('--maxiter',type=int,default=6); ap.add_argument('--popsize',type=int,default=5); ap.add_argument('--local-maxiter',type=int,default=160)
     ap.add_argument('--seed',type=int,default=20260927); ap.add_argument('--gap-weight',type=float,default=2.0); ap.add_argument('--reg-weight',type=float,default=.025)
     ap.add_argument('--outdir',default='.'); ap.add_argument('--tag',default='image_fit')
     BIND, PARAM_TABLE = resolve_yaehmop_assets()
     args=ap.parse_args(); out=Path(args.outdir); out.mkdir(parents=True,exist_ok=True); work=out/'work'; work.mkdir(exist_ok=True)
-    cif=Path(args.cif).resolve(); image=Path(args.image).resolve(); atoms=read(cif); symbols=atoms.get_chemical_symbols(); elements=list(dict.fromkeys(s.capitalize() for s in symbols))
+    cif=Path(args.cif).resolve(); image=Path(args.image).resolve(); sfmt=resolved_structure_format(cif,args.structure_format); atoms=read_structure(cif,sfmt); symbols=atoms.get_chemical_symbols(); elements=list(dict.fromkeys(s.capitalize() for s in symbols))
     table=parse_parameter_table(PARAM_TABLE); defaults=subset_for_elements(table,elements); norb=orbital_count(defaults,symbols); nelec=valence_electrons(defaults,symbols); nocc=nelec//2
     if norb<=nocc: raise ValueError('Invalid basis/electron count')
     points=parse_points(args.symmetry_points,args.point_dim)
     if len(points)!=len(args.labels): raise ValueError('labels and symmetry points count differ')
     path=BandPath(tuple(args.labels),points,args.points_per_line); target=load_band_image(image,args.emin,args.emax); tv,tc,tgap=image_gap(target,fermi=args.fermi); tmid=.5*(tv+tc)
+    images=overlap_images_for(args.point_dim,args.overlap_radius)
     specs,x0,bounds,scales=build_specs(defaults,elements); names=[f'{a}_{b}_{c}'.strip('_') for a,b,c in specs]
     inp=work/f'{args.tag}.bind'; parm=work/f'{args.tag}.parms'; runlog=work/f'{args.tag}.run.log'; history=[]; neval=0; best=[1e99,None,None]
     # x coordinate depends only on the requested path/cell.
@@ -94,7 +98,7 @@ def main():
         nonlocal neval,best; neval+=1; p,K=apply_x(defaults,specs,x)
         if not physical_ok(p): return 100.0
         try:
-            write_parameter_file(parm,p); write_periodic_input_generic(cif,inp,path,K,True,nelec); run_bind(BIND,inp,parm,runlog); _,M=parse_band(str(inp)+'.band')
+            write_parameter_file(parm,p); write_periodic_input_generic(cif,inp,path,K,True,nelec,overlap_images=images,periodic_dim=args.point_dim,structure_format=sfmt); run_bind(BIND,inp,parm,runlog); _,M=parse_band(str(inp)+'.band')
             if M.shape!=(len(xcoord),norb) or not np.isfinite(M).all(): return 100.0
             mv=float(M[:,nocc-1].max()); mc=float(M[:,nocc].min()); mgap=mc-mv; mmid=.5*(mv+mc); shift=tmid-mmid; A=M+shift
             r_mt,r_tm=image_shape_metrics(target,xcoord,A); gaperr=mgap-tgap; reg=float(np.sqrt(np.mean(((np.asarray(x)-x0)/scales)**2)))
@@ -113,7 +117,7 @@ def main():
     xb=loc.x if loc.fun<de.fun else de.x; fin=objective(xb); pbest,Kbest=apply_x(defaults,specs,xb)
     with (out/f'{args.tag}_history.csv').open('w',newline='') as f:
         w=csv.DictWriter(f,fieldnames=list(history[0])); w.writeheader(); w.writerows(history)
-    result={'tag':args.tag,'source_image':str(image),'cif':str(cif),'elements':elements,'basis_orbitals':norb,'valence_electrons':nelec,'occupied_spatial_bands':nocc,
+    result={'tag':args.tag,'source_image':str(image),'cif':str(cif),'structure_format':sfmt,'elements':elements,'basis_orbitals':norb,'valence_electrons':nelec,'occupied_spatial_bands':nocc,
       'image':{'emin':args.emin,'emax':args.emax,'fermi':args.fermi,'bbox':target['bbox'],'VBM_eV':tv,'CBM_eV':tc,'gap_eV':tgap},'path':{'labels':args.labels,'points':points.tolist(),'points_per_line':args.points_per_line,'n_k_fit':len(xcoord)},
       'variables':names,'bounds':bounds,'default_x':{n:float(v) for n,v in zip(names,x0)},'best_x':{n:float(v) for n,v in zip(names,xb)},'K':float(Kbest),'base_loss':float(base),'final_loss':float(fin),'best_seen':best[2],
       'optimizer':{'de_fun':float(de.fun),'de_success':bool(de.success),'de_message':str(de.message),'local_fun':float(loc.fun),'local_success':bool(loc.success),'local_message':str(loc.message),'local_nit':int(loc.nit),'local_nfev':int(loc.nfev)},'evaluations':neval,'elapsed_s':time.time()-t0}

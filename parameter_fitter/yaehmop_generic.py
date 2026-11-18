@@ -7,6 +7,20 @@ import numpy as np
 
 HERE=Path(__file__).resolve().parent
 
+# Periodic images per ACTIVE lattice direction, shared by fitting and
+# recomputation so that the fitted and the recomputed Hamiltonians match.
+# 5 converges carbon test bands to ~1e-5 eV (4 leaves ~1e-3 eV errors).
+DEFAULT_OVERLAP_RADIUS=5
+
+def overlap_images_for(periodic_dim,radius=DEFAULT_OVERLAP_RADIUS):
+    """Overlap images (a,b,c): `radius` along active directions, 0 elsewhere."""
+    periodic_dim=int(periodic_dim); radius=int(radius)
+    if periodic_dim not in (1,2,3):
+        raise ValueError("periodic_dim must be 1, 2, or 3")
+    if not 1<=radius<=8:
+        raise ValueError("overlap radius must be in 1..8")
+    return tuple(radius if j<periodic_dim else 0 for j in range(3))
+
 @dataclass(frozen=True)
 class BandPath:
     labels: tuple[str, ...]
@@ -97,10 +111,11 @@ def write_parameter_file(path,params):
     Path(path).write_text('\n'.join(lines)+'\n')
     return Path(path)
 
-def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2):
-    from ase.io import read
+def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2,structure_format=None,kpoints=None):
+    """cif_path: any structure file read by structure_io (CIF, VASP, QE, SIESTA, FHI-aims)."""
+    from structure_io import read_structure
     cif_path,out_path=Path(cif_path),Path(out_path)
-    atoms=read(cif_path); frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
+    atoms=read_structure(cif_path,structure_format); frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
     if periodic_dim not in (1,2,3):
         raise ValueError("periodic_dim must be 1, 2, or 3")
     if len(overlap_images)!=3 or any(int(v)<0 for v in overlap_images):
@@ -128,7 +143,72 @@ def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weight
               f'{angles[0]:.12f} {angles[1]:.12f} {angles[2]:.12f}',
               '', f'THE CONST {k_const:.12f}']
     if not weighted_hij: lines.append('NONWEIGHTED')
-    lines += ['','Band',str(band_path.points_per_line),str(len(band_path.labels))]
-    for label,k in zip(band_path.labels,band_path.points): lines.append(f"{label:3s} {k[0]: .12f} {k[1]: .12f} {k[2]: .12f}")
+    if kpoints is None:
+        lines += ['','Band',str(band_path.points_per_line),str(len(band_path.labels))]
+        for label,k in zip(band_path.labels,band_path.points): lines.append(f"{label:3s} {k[0]: .12f} {k[1]: .12f} {k[2]: .12f}")
+    else:
+        # Explicit k list: YAeHMOP writes H(k) and S(k) (Dump Hamil / Dump Overlap)
+        kpoints=np.atleast_2d(np.asarray(kpoints,float))
+        lines += ['','Dump Hamil','Dump Overlap','','K points',str(len(kpoints))]
+        lines.extend(f"{k[0]: .12f} {k[1]: .12f} {k[2]: .12f} 1.0" for k in kpoints)
     if electrons is not None: lines += ['','electrons',str(int(electrons))]
     lines.append(''); out_path.write_text('\n'.join(lines)); return out_path
+
+
+def orbital_labels(params,symbols):
+    """Atom/orbital label of every basis function, in YAeHMOP order (s, p, d, f)."""
+    shapes={"s":["s"],"p":["px","py","pz"],"d":["dx2-y2","dz2","dxy","dxz","dyz"],
+            "f":["fz3","fxz2","fyz2","fxyz","fz(x2-y2)","fx(x2-3y2)","fy(3x2-y2)"]}
+    out=[]
+    for i,s in enumerate(symbols,1):
+        for shell in ("s","p","d","f"):
+            if shell in params[s]:
+                out += [f"{s}{i}:{o}" for o in shapes[shell]]
+    return out
+
+def read_matrix_dump(path):
+    """YAeHMOP .HAM/.OV binary dump -> complex array (nk, n, n).
+
+    File: int nk, int n, then per k an n*n double array (row major) holding the
+    real part of element (l,m), l<=m, at [l,m] and an imaginary part at [m,l].
+    Returned in the usual convention H(k) = sum_R exp(+i k.R) H(R), with
+    H_ij(R) = <phi_i(0)|H|phi_j(R)> (checked against interatomic distances).
+    """
+    raw=Path(path).read_bytes()
+    nk,n=np.frombuffer(raw[:8],dtype=np.int32)
+    data=np.frombuffer(raw[8:8+8*nk*n*n],dtype=np.float64).reshape(nk,n,n)
+    iu=np.triu_indices(n,1)
+    out=np.zeros((nk,n,n),complex)
+    for q in range(nk):
+        m=data[q]
+        up=m[iu]-1j*m.T[iu]
+        H=np.diag(np.diag(m)).astype(complex)
+        H[iu]=up
+        H[(iu[1],iu[0])]=np.conj(up)
+        out[q]=H
+    return out
+
+
+ORBITAL_LM={"s":(0,0),"px":(1,1),"py":(1,-1),"pz":(1,0),
+    "dx2-y2":(2,2),"dz2":(2,0),"dxy":(2,-2),"dxz":(2,1),"dyz":(2,-1),
+    "fz3":(3,0),"fxz2":(3,1),"fyz2":(3,-1),"fxyz":(3,-2),"fz(x2-y2)":(3,2),
+    "fx(x2-3y2)":(3,3),"fy(3x2-y2)":(3,-3)}
+
+def real_space_matrices(Hk,Sk,mesh,dim,radius):
+    """H(R), S(R) for the cells -radius..radius from H(k), S(k) on the full
+    Gamma-centred mesh of (2*radius+1)^dim points (exact for YAeHMOP, whose
+    lattice sums stop at `radius` cells)."""
+    import itertools
+    rng=[range(-radius,radius+1) if i<dim else (0,) for i in range(3)]
+    cells=[np.array(R) for R in itertools.product(*rng)]
+    out=[]
+    for R in cells:
+        ph=np.exp(-2j*np.pi*(mesh@R))[:,None,None]
+        out.append((R,(ph*Hk).sum(0)/len(mesh),(ph*Sk).sum(0)/len(mesh)))
+    return out
+
+def gamma_mesh(dim,radius):
+    import itertools
+    n=2*radius+1
+    axes=[np.arange(n)/n if i<dim else np.zeros(1) for i in range(3)]
+    return np.array(list(itertools.product(*axes)))

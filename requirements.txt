@@ -4,3 +4,5 @@ ase>=3.22
 Pillow>=10.0
 matplotlib>=3.7
 PyYAML>=6.0
+scikit-learn>=1.2  # optional: optimizer "bayesian"
+cma>=3.3           # optional: optimizer "cmaes"

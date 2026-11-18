@@ -1,0 +1,6 @@
+ &bands
+    prefix='sic',
+    outdir='./'
+    filband='sic_pbe'
+    lsym=.true.,
+ /

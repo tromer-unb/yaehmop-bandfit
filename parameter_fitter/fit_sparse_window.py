@@ -8,11 +8,16 @@ the FULL original Hamiltonian for each real parameter candidate.
 
 Staged initializer: original YAeHMOP DE -> bounded Nelder-Mead.
 Optional equal-budget refinements: NM, SA, SA+NM, Hooke-Jeeves.
+Global searches from the stock parameters (ported from dftb_sk_gen):
+full DE, Bayesian optimization, CMA-ES, genetic algorithm, Powell, each
+with an optional local polish (Nelder-Mead or Powell) inside the budget.
 """
 from pathlib import Path
 import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
-from ase.io import read
+from structure_io import read_structure,resolved_structure_format
+from dft_bands import load_reference,eht_reference
+from band_objective import WindowSettings,window_error,extend_basis,parse_basis_add,OBJECTIVES
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -22,15 +27,20 @@ from generate_mc2d_multiband import read_colored_png
 from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
  subset_for_elements,orbital_count,valence_electrons,
  BandPath,normalized_path_coordinate,write_parameter_file,
- write_periodic_input_generic,run_bind,parse_band)
+ write_periodic_input_generic,run_bind,parse_band,
+ DEFAULT_OVERLAP_RADIUS,overlap_images_for)
 from p3_objectives import bounded_nelder_mead,hooke_jeeves
 from simulated_annealing import simulated_annealing
 from hybrid_sa_nm import hybrid_sa_nelder_mead
+from global_optimizers import run_global,GLOBAL_METHODS,POLISH_METHODS
 
 def parse_sample(e,root,defaults,shared):
     cif=(root/e["structure"]).resolve()
     png=(root/e["reference"]).resolve()
-    atoms=read(cif);syms=atoms.get_chemical_symbols()
+    sfmt=e.get("structure_format",shared.get("structure_format"))
+    atoms=read_structure(cif,sfmt);syms=atoms.get_chemical_symbols()
+    if e.get("reference_format",shared.get("reference_format","image"))=="dft":
+        return parse_dft_sample(e,root,defaults,shared,cif,png,sfmt,atoms)
     params={k:defaults[k] for k in set(syms)}
     norb=orbital_count(params,syms)
     nelec=valence_electrons(params,syms)
@@ -43,6 +53,10 @@ def parse_sample(e,root,defaults,shared):
         raise ValueError(f"{e['name']} requires {n_pairs} conduction/valence orbitals; EHT only has {norb-nocc} conduction")
 
     dim=int(e.get("point_dim",2))
+    # The k-point dimension IS the lattice periodicity: a 3D crystal must
+    # be written as Lattice 3, not as a one-cell-thick 2D slab.
+    radius=int(e.get("overlap_radius",shared.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)))
+    images=overlap_images_for(dim,radius)
     nodes=parse_points([x for node in e["symmetry_points"] for x in node],dim)
     labels=tuple(e["labels"])
     n=int(e.get("points_per_line",shared.get("points_per_line",10)))
@@ -73,11 +87,62 @@ def parse_sample(e,root,defaults,shared):
     return dict(name=e["name"],cif=cif,png=png,symbols=syms,
       elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=nocc,
       path=path,kx=kx,target=target,n_pairs=n_pairs,gap=tc-tv,weight=float(e.get("weight",1.)),
+      periodic_dim=dim,overlap_images=images,structure_format=sfmt,
       png_hash=hashlib.sha256(png.read_bytes()).hexdigest(),
       cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
 
+def parse_dft_sample(e,root,defaults,shared,cif,ref_path,sfmt,atoms):
+    """Numerical DFT reference (.npz from dft_bands.save_reference).
+
+    YAeHMOP runs on a path through the DFT segments; the DFT eigenvalues are
+    interpolated at exactly those k points. Points on the connecting line of a
+    discontinuity (X|U) are computed but excluded through s["kmask"].
+    """
+    syms=atoms.get_chemical_symbols()
+    params={k:defaults[k] for k in set(syms)}
+    norb=orbital_count(params,syms)
+    nelec=valence_electrons(params,syms)
+    if nelec%2:raise ValueError("spinless YAeHMOP needs even nelec")
+    nocc=nelec//2
+    p=int(e.get("n_pairs",shared.get("n_pairs",2)))
+    if p not in (1,2,3,4):raise ValueError("P5 N must be 1,2,3,4")
+    if min(nocc,norb-nocc)<p:
+        raise ValueError(f"{e['name']} requires {p} conduction/valence orbitals; EHT only has {norb-nocc} conduction")
+    dim=int(e.get("point_dim",3))
+    radius=int(e.get("overlap_radius",shared.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)))
+    images=overlap_images_for(dim,radius)
+    n=int(e.get("points_per_line",shared.get("points_per_line",20)))
+    ref=load_reference(ref_path,atoms)
+    er=eht_reference(ref,n,dim)
+    dn=ref.nocc;T=er.energies
+    if dn<p or T.shape[1]-dn<p:
+        raise ValueError(f"{e['name']}: the DFT data has {dn} occupied and {T.shape[1]-dn} empty bands; "
+                         f"{p}+{p} requested")
+    target=T[:,dn-p:dn+p].copy()
+    tv=float(target[:,p-1].max());tc=float(target[:,p].min())
+    if tc-tv<.02:raise ValueError(e["name"]+": no positive DFT gap on the path")
+    mid=.5*(tv+tc)
+    return dict(name=e["name"],cif=cif,png=ref_path,symbols=syms,
+      elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=nocc,
+      path=BandPath(tuple(er.labels),er.nodes,n),kx=er.x,kmask=er.mask,
+      target=target-mid,target_all=T-mid,dft_nocc=dn,ticks=er.ticks,
+      n_pairs=p,gap=tc-tv,weight=float(e.get("weight",1.)),
+      periodic_dim=dim,overlap_images=images,structure_format=sfmt,
+      png_hash=hashlib.sha256(ref_path.read_bytes()).hexdigest(),
+      cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
+
+def write_sample_input(s,inp,k):
+    """Native periodic input for one sample, honouring its dimensionality."""
+    return write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"],
+        overlap_images=s["overlap_images"],periodic_dim=s["periodic_dim"],
+        structure_format=s.get("structure_format"))
+
 def scores(bands,s):
     n=s["nocc"]
+    if s.get("kmask") is not None:
+        if bands.shape!=(len(s["kmask"]),s["norb"]):
+            raise ValueError("physical EHT spectrum shape mismatch")
+        bands=bands[s["kmask"]]
     if bands.shape!=(len(s["kx"]),s["norb"]):
         raise ValueError("physical EHT spectrum shape mismatch")
     gap=float(bands[:,n].min()-bands[:,n-1].max())
@@ -109,13 +174,37 @@ class Fitter:
         if not self.train_entries:raise ValueError("Need at least one training system")
         elements=[]
         for e in self.train_entries:
-            for el in read((base/e["structure"]).resolve()).get_chemical_symbols():
+            for el in read_structure((base/e["structure"]).resolve(),e.get("structure_format",config.get("structure_format"))).get_chemical_symbols():
                 if el not in elements:elements.append(el)
         self.elements=elements
         self.bind,table=resolve_yaehmop_assets()
         self.stockparams=valid_basis(subset_for_elements(parse_parameter_table(table),elements))
+        self.basis_add=parse_basis_add(config.get("basis_add"))
+        if self.basis_add:
+            before={el:set(v) for el,v in self.stockparams.items()}
+            self.stockparams=extend_basis(self.stockparams,self.basis_add)
+            self.basis_add={el:sorted(set(v)-before[el]-{"atnum","nval"}) for el,v in self.stockparams.items()
+                            if set(v)-before[el]}
+        self.start_from=config.get("start_table")
+        if self.start_from:
+            # Start (and centre the bounds and the regularization) at an earlier fit:
+            # its shells replace the stock ones; shells it has and the stock lacks are added.
+            st=parse_parameter_table(self.start_from)
+            for el in self.stockparams:
+                if el in st:
+                    for orb in ("s","p","d","f"):
+                        if orb in st[el]:
+                            self.stockparams[el][orb]=dict(st[el][orb])
+        self.objective_name=str(config.get("objective","frontier"))
+        if self.objective_name not in OBJECTIVES:
+            raise ValueError(f"objective must be one of {OBJECTIVES}")
+        self.wset=WindowSettings.from_dict(config.get("objective_settings"))
         self.train=[parse_sample(e,base,self.stockparams,config) for e in self.train_entries]
         self.specs,self.stock,self.bounds,self.scales=build_specs(self.stockparams,elements)
+        if self.start_from and config.get("start_K") is not None:
+            iK=[i for i,s in enumerate(self.specs) if s[2]=="K"][0]
+            K0=float(config["start_K"]);self.stock[iK]=K0
+            self.bounds=list(self.bounds);self.bounds[iK]=(max(1.0,K0-0.6),min(2.8,K0+0.6))
         self.bounds=list(self.bounds)
         for i,spec in enumerate(self.specs):
             if spec[2]=="Hii":
@@ -131,7 +220,7 @@ class Fitter:
         w=self.work/s["name"];w.mkdir(exist_ok=True)
         native=w/(tag+".parms");inp=w/(tag+".bind");log=w/(tag+".log")
         write_parameter_file(native,{a:params[a] for a in s["elements"]})
-        write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"])
+        write_sample_input(s,inp,k)
         run_bind(self.bind,inp,native,log)
         _,bands=parse_band(str(inp)+".band")
         for tmp in w.glob(tag+"*"):
@@ -145,8 +234,14 @@ class Fitter:
             values=[];weights=[]
             line=dict(K=float(K))
             for s in self.train:
-                m,_=scores(self.run(s,params,K,f"trial_{self.calls:07d}"),s)
-                val=m["selected_rmse_eV"]+self.gap_w*abs(m["gap_error_eV"])
+                full=self.run(s,params,K,f"trial_{self.calls:07d}")
+                m,_=scores(full,s)
+                if self.objective_name=="window":
+                    wm=self.window_metrics(full,s)
+                    val=wm["total"]
+                    line[s["name"]+"_window_rms_eV"]=wm["window_rms_eV"]
+                else:
+                    val=m["selected_rmse_eV"]+self.gap_w*abs(m["gap_error_eV"])
                 values.append(val);weights.append(s["weight"])
                 line[s["name"]+"_selected_rmse_eV"]=m["selected_rmse_eV"]
                 line[s["name"]+"_two_rmse_eV"]=m["two_rmse_eV"]
@@ -158,23 +253,41 @@ class Fitter:
             return cost,line
         except Exception as exc:
             return 1e4,{"error":str(exc)}
+    def window_metrics(self,full,s):
+        if s.get("target_all") is None:
+            raise ValueError("objective 'window' needs a numerical DFT reference")
+        E=full[s["kmask"]]
+        return window_error(s["target_all"],s["dft_nocc"],E,s["nocc"],s["kx"],
+                            [x for x,_ in s["ticks"]],self.wset)
     def characterize(self,x,withheld):
         params,K=apply_x(self.stockparams,self.specs,np.asarray(x,float))
         specs=list(self.train)
         if withheld:
             # Heldout CIF and PNG are opened ONLY after the optimizer freezes x.
             for e in self.test_entries:
-                ats=read((self.base/e["structure"]).resolve())
+                ats=read_structure((self.base/e["structure"]).resolve(),e.get("structure_format",self.conf.get("structure_format")))
                 if not set(ats.get_chemical_symbols()).issubset(self.elements):
                     raise ValueError("Unseen test elements cannot be transferred")
                 specs.append(parse_sample(e,self.base,self.stockparams,self.conf))
         result={}
         for s in specs:
-            met,b=scores(self.run(s,params,K,"final_eigen"),s)
+            full=self.run(s,params,K,"final_eigen")
+            met,b=scores(full,s)
+            if s.get("target_all") is not None:
+                met["window"]=self.window_metrics(full,s)
             met["role"]="train" if s["name"] in [t["name"] for t in self.train] else "test"
             result[s["name"]]=met
+            extra={}
+            if s.get("target_all") is not None:
+                # Whole spectra for the full comparison figure, each relative to its midgap
+                E=full[s["kmask"]];n=s["nocc"]
+                emid=.5*(float(E[:,n].min())+float(E[:,n-1].max()))
+                extra=dict(reference_all=s["target_all"],YAeHMOP_all=E-emid,
+                           tick_x=np.array([x for x,_ in s["ticks"]],float),
+                           tick_labels=np.array([l for _,l in s["ticks"]]),
+                           dft_nocc=s["dft_nocc"],eht_nocc=n,n_pairs=s["n_pairs"])
             np.savez_compressed(self.out/(s["name"]+"_bands.npz"),k=s["kx"],
-                                reference=s["target"],YAeHMOP=b)
+                                reference=s["target"],YAeHMOP=b,**extra)
         return result
 
 def base_fit(f,budget,seed):
@@ -213,7 +326,13 @@ def main():
     p.add_argument("--initialization",choices=("staged","existing","transferred"),default="staged")
     p.add_argument("--start-json")
     p.add_argument("--optimizer",choices=("nelder-mead","simulated-annealing",
-                   "sa-nelder-mead","hooke-jeeves"),default="nelder-mead")
+                   "sa-nelder-mead","hooke-jeeves")+GLOBAL_METHODS,default="nelder-mead",
+                   help="staged: nelder-mead = short DE + NM; a global method runs from the stock "
+                        "parameters with the whole budget. existing/transferred: refinement method")
+    p.add_argument("--polish",choices=POLISH_METHODS,default=None,
+                   help="local refinement after a global method, inside the same budget")
+    p.add_argument("--polish-fraction",type=float,default=.25,
+                   help="share of the budget given to --polish (default 0.25)")
     p.add_argument("--budget",type=int,default=300)
     p.add_argument("--n-pairs",type=int,choices=(1,2,3,4),default=None,
                    help="Override YAML; number of VB and CB bands each")
@@ -229,12 +348,22 @@ def main():
         p.error("n_pairs must be 1, 2, 3 or 4")
     names=[e["name"] for e in config["systems"] if e.get("role","train")=="train"]
     tests=[e["name"] for e in config["systems"] if e.get("role")=="test"]
+    if args.polish and args.optimizer not in GLOBAL_METHODS:
+        p.error("--polish is only used with "+", ".join(GLOBAL_METHODS))
+    if not 0<args.polish_fraction<1:
+        p.error("--polish-fraction must be between 0 and 1")
     if args.validate_only:
         print(json.dumps(dict(train=names,test=tests,test_files_opened=False)))
         return
     out=Path(args.outdir).resolve();out.mkdir(exist_ok=True,parents=True)
     f=Fitter(config,cfgfile.parent,out)
-    if args.initialization=="staged":
+    if args.initialization=="staged" and args.optimizer in GLOBAL_METHODS:
+        result=run_global(args.optimizer,f.objective,f.stock,f.bounds,args.budget,
+                          seed=args.seed,polish_method=args.polish,
+                          polish_fraction=args.polish_fraction)
+        x=result["best_x"] if result["best_x"] is not None else f.stock
+        start_meta=None
+    elif args.initialization=="staged":
         result=base_fit(f,args.budget,args.seed)
         x=result["best_x"]
         start_meta=None
@@ -271,8 +400,13 @@ def main():
         kw={"budget":args.budget}
         if args.optimizer in ("simulated-annealing","sa-nelder-mead"):
             kw["seed"]=args.seed
-        result=options[args.optimizer](f.objective,x0,f.bounds,**kw)
-        result["optimizer"]=args.optimizer
+        if args.optimizer in GLOBAL_METHODS:
+            result=run_global(args.optimizer,f.objective,x0,f.bounds,args.budget,
+                              seed=args.seed,polish_method=args.polish,
+                              polish_fraction=args.polish_fraction)
+        else:
+            result=options[args.optimizer](f.objective,x0,f.bounds,**kw)
+            result["optimizer"]=args.optimizer
         # Freeze at global best TRAINING objective found in either stage;
         # do not use the heldout reference to choose this vector.
         compare_loss=(baseline_loss if baseline_loss is not None else
@@ -285,7 +419,8 @@ def main():
       image_mode=config.get("image_mode","auto"),initializer=args.initialization,
       adaptation_prior_material_was_heldout=(
            args.initialization=="transferred"),
-      optimizer=result["optimizer"],train_systems=names,test_systems=tests,
+      optimizer=result["optimizer"],optimizer_message=result.get("message"),
+      polish=result.get("polish"),train_systems=names,test_systems=tests,
       test_evaluated=not args.skip_test_eval,budget=args.budget,
       objective_evaluations=result["evaluations"],seed=args.seed,
       best_training_loss=float(result["best_loss"] if args.initialization=="staged"
@@ -304,7 +439,15 @@ def main():
                           result.get("nm_stage_evaluations")] if args.optimizer=="sa-nelder-mead" and
                             args.initialization=="existing" else None,
       objective_weights={"rmse_selected":1.,"gapMAE":f.gap_w,"param_reg":f.reg_w},
-      metrics=met,n_params=len(f.names))
+      metrics=met,n_params=len(f.names),
+      overlap_radius=int(config.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)),
+      lattice={s["name"]:dict(periodic_dim=s["periodic_dim"],
+                              overlap_images=list(s["overlap_images"]))
+               for s in f.train},
+      structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
+                         for s in f.train},
+      objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name=="window" else None,
+      basis_added=f.basis_add or None,start_from=str(f.start_from) if f.start_from else None)
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

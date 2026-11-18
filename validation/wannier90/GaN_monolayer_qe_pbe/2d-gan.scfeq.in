@@ -1,0 +1,51 @@
+&control
+    prefix='gan'
+    calculation='scf',
+    tstress=.true.,
+    tprnfor=.true.,
+    pseudo_dir = '/home/elie/PP/'
+    wf_collect=.true.
+    outdir='/home/elie/2D-GaN/THERMO/OUT/'
+    etot_conv_thr=1.0D-6
+    forc_conv_thr=1.0D-5
+
+ /
+ &system
+    ibrav=0, nat=2, ntyp= 2, ecutwfc=85,  occupations='fixed', nbnd=16
+
+
+
+/
+ &electrons
+    electron_maxstep=2000
+    conv_thr=1.D-7,
+    mixing_beta=0.05D0,
+    mixing_mode='plain',
+   !diagonalization='cg'
+
+ /
+&ions
+ion_dynamics='bfgs'
+/
+
+&cell
+cell_dynamics='bfgs'
+press=0.0
+cell_dofree='2Dxy'
+/
+
+ATOMIC_SPECIES
+ N   14.00674  N-paw-sr.upf
+ Ga  69.72300  Ga-paw-sr.upf
+
+CELL_PARAMETERS angstrom
+   3.210406970   0.000000000   0.000000000
+  -1.605203485   2.780293939   0.000000000
+   0.000000000   0.000000000  20.000000000
+
+ATOMIC_POSITIONS angstrom
+Ga           -0.0000015803        1.8535302144       10.2015674076
+N             1.6052050651        0.9267637245       10.2024325924
+
+K_POINTS automatic
+14 14 1 0 0 0

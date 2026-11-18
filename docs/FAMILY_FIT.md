@@ -53,6 +53,8 @@ systems:
 
 **Important physical conditions:** the held-out material must be entirely excluded from fitting, but its elements must already be represented in the training compounds' atomic tables. The example train MoS2 + WSe2 covers Mo, W, S and Se, whereas training only MoS2 then testing WSe2 lacks W and Se parameters and is rejected rather than guessed.
 
+Any `structure:` may also be a VASP, Quantum ESPRESSO, SIESTA or FHI-aims file (optional per-system `structure_format:`; see [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md)).
+
 Each file.ini uses the same standalone structure as the direct fit:
 ~~~ini
 [reference]

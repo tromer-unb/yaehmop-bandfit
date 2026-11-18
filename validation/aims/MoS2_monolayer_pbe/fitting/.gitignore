@@ -1,0 +1,8 @@
+# Only the two best protocols (and spin-orbit fits) go to the repository;
+# the other protocol folders stay local.
+*
+!.gitignore
+!refine-bands/
+!refine-bands/**
+!window-cmaes/
+!window-cmaes/**

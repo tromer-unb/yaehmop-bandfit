@@ -1,0 +1,51 @@
+Electronic relaxation:
+
+ENCUT = 460      !energia de cutoff
+ALGO = Normal    !algoritmo para minimizacao eletronica
+NELM = 200       !valor default para numero de passos SCF
+NELMIN = 6       !numero minimo de passos SCF
+NELMDL = -1      !numero de passos NSCF no inicio
+EDIFF = 1.0E-6   !criterio de convergencia SCF
+AMIX = 0.1       !mix densidade pmix=(1-AMIX)*pin+AMIX*pout
+BMIX = 0.0001    !outra variavel para misturar densidade
+NBANDS = 128     !numero de bandas para calculo
+
+
+Calculation mode:
+
+PREC = Accurate  !influencia a FFT
+IVDW = 0         !interacao vdW Grimme D3
+ISPIN = 1        !spin nao polarizado
+ADDGRID = .TRUE. !grid adicional para diminuir ruido no calculo das forcas
+LASPH = .TRUE.
+
+Ionic relaxation:
+
+NSW = 0          !numero maximo de passos na relaxacao
+EDIFFG = -0.010  !para a relaxacao quando as forcas forem menores que |EDIFFG|
+IBRION = 2       !algoritmo para relaxacao da rede, POTIM não interfere muito
+ISIF = 3         !relaxacao da celula unitaria e ions, muda forma e volume da celula(2 pode vir a ser melhor)
+POTIM = 0.5
+STRESSTYPE = 2   !stxy constrain
+
+Integration over the Brillouin zone (BZ):
+
+ISMEAR = 0       !Gaussian-smearing
+SIGMA = 0.01     !largura do smearing em eV
+
+DOS calculation:
+
+LSORBIT = .FALSE. !acoplamento spin-órbita DESLIGADO
+LORBIT = 10       !escreve DOSCAR e PROCAR
+NEDOS = 6001      !numero de pontos no grid da DOS
+
+OUTCAR size:
+NWRITE = 1       !informacao escrita no OUTCAR
+LWAVE = .FALSE.  !nao escreve o WAVECAR
+LCHARG = .FALSE. !nao escreve o CHGCAR e CHG
+ICHARG = 11      !como CHGCAR e CHG foram gravadas no cálculo-scf, agora serão lidas no cálculo-bandas
+
+Key for parallel mode calculation:
+
+NCORE = 4        !numero de cores por orbital
+LPLANE = .TRUE.

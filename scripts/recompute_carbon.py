@@ -36,8 +36,8 @@ if __name__=="__main__":
                    help="Your authorized YAeHMOP-format parameter table; independent of the one used by PBE fits")
     p.add_argument("--k",type=float,default=1.75,
                    help="Extended Hückel Wolfsberg–Helmholtz constant, default 1.75")
-    p.add_argument("--overlap-radius",type=int,default=4,
-                   help="Images in each periodic lattice direction; default 4")
+    p.add_argument("--overlap-radius",type=int,default=5,
+                   help="Images in each periodic lattice direction; default 5 (same as fitting)")
     p.add_argument("--outdir",type=Path,default=Path("outputs/carbon"))
     a=p.parse_args()
     if not 1<=a.overlap_radius<=8:p.error("--overlap-radius must be 1..8")

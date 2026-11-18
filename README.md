@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/bandfit_logo_dark.svg" alt="YAeHMOP BandFit" width="560"></p>
+
 # YAeHMOP BandFit
 
 **Fit and visualize electronic bands with physical extended Hückel theory — 2, 4, 6 or 8 bands.**
@@ -55,6 +57,10 @@ python3 quick.py
 **New user? Start here:** [Complete copy-and-paste tutorial (English)](docs/FIT_YOUR_MATERIAL.md) · [Passo a passo em português](docs/GUIA_RAPIDO_PT.md).
 
 Provide **structure.cif** + **bands.png** (or exact numeric CSV), edit one **file.ini** containing the plot energy limits and **correct reciprocal path**, and run:
+
+> **Raw DFT data as reference:** point the program to the folder of a VASP, Quantum ESPRESSO, SIESTA or FHI-aims band-structure calculation (`--dft-dir FOLDER --dft-code vasp|qe|siesta|aims`) and it fits to the eigenvalues themselves, no image needed. Every fit writes `OUTDIR/fitting/` with the Hückel parameters, the comparison figures (reference blue, EHT red dashed, errors in the figure) and the YAeHMOP Hamiltonian and overlap matrices as plain text (`huckel-NP.dat` in the WanTiBEXOS format). See [DFT references](docs/DFT_REFERENCE.md) and the examples in [validation/](validation/README.md).
+
+> Instead of a CIF you can give the structure file of **VASP** (POSCAR/CONTCAR/OUTCAR/vasprun.xml), **Quantum ESPRESSO** (pw.x input, any `ibrav`, or output), **SIESTA** (.fdf/.XV/.STRUCT_OUT) or **FHI-aims** (geometry.in/output); the format is detected automatically. See [structure formats](docs/STRUCTURE_FORMATS.md).
 
 ~~~bash
 # Working directory: cloned repository root

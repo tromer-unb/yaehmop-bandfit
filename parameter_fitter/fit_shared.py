@@ -6,7 +6,7 @@ import argparse, copy, csv, json, sys, time
 
 import numpy as np
 import yaml
-from ase.io import read
+from structure_io import read_structure, normalize_structure_format
 from scipy.optimize import differential_evolution, minimize
 
 HERE = Path(__file__).resolve().parent
@@ -17,7 +17,7 @@ from yaehmop_generic import (
     BandPath, normalized_path_coordinate, orbital_count, parse_band,
     parse_parameter_table, resolve_yaehmop_assets, run_bind,
     subset_for_elements, valence_electrons, write_parameter_file,
-    write_periodic_input_generic,
+    write_periodic_input_generic, DEFAULT_OVERLAP_RADIUS, overlap_images_for,
 )
 
 
@@ -62,6 +62,10 @@ def validate_schema(shared, systems):
             raise ValueError(f"System {s['name']}: require emin < emax")
         if len(s["labels"]) != len(s["symmetry_points"]):
             raise ValueError(f"System {s['name']}: labels/points length mismatch")
+        try:
+            normalize_structure_format(s.get("structure_format", shared.get("structure_format")))
+        except ValueError as exc:
+            raise ValueError(f"System {s['name']}: {exc}") from None
         names.append(str(s["name"]))
     if len(names) != len(set(names)):
         raise ValueError("System names must be unique")
@@ -84,7 +88,8 @@ def prepare_system(entry, base, defaults, shared):
     name = str(entry["name"])
     cif = resolve_relative(base, entry["structure"])
     image = resolve_relative(base, entry["reference"])
-    atoms = read(cif)
+    structure_format = entry.get("structure_format", shared.get("structure_format"))
+    atoms = read_structure(cif, structure_format)
     symbols = atoms.get_chemical_symbols()
     elements = list(dict.fromkeys(s.capitalize() for s in symbols))
     params = subset_params(defaults, elements)
@@ -95,6 +100,9 @@ def prepare_system(entry, base, defaults, shared):
         raise ValueError(f"{name}: invalid basis/electron count")
 
     point_dim = int(entry.get("point_dim", 2))
+    overlap_images = overlap_images_for(
+        point_dim, int(entry.get("overlap_radius",
+                                 shared.get("overlap_radius", DEFAULT_OVERLAP_RADIUS))))
     flat = [v for p in entry["symmetry_points"] for v in p]
     points = parse_points(flat, point_dim)
     labels = tuple(str(v) for v in entry["labels"])
@@ -134,9 +142,11 @@ def prepare_system(entry, base, defaults, shared):
 
     return {"name": name, "role": str(entry.get("role", "train")).lower(),
             "weight": float(entry.get("weight", 1.0)), "cif": cif,
+            "structure_format": structure_format,
             "image": image, "atoms": atoms, "symbols": symbols,
             "elements": elements, "norb": norb, "nelec": nelec,
             "nocc": nocc, "path": path, "xcoord": xcoord, "T": T,
+            "periodic_dim": point_dim, "overlap_images": overlap_images,
             "W": W, "mask": mask, "target_gap": target_gap,
             "target_mid": target_mid, "fit_window": fit_window,
             "trace_seed_x": float(xtrace[seedidx]), "trace_counts": counts}
@@ -198,7 +208,8 @@ def main():
     base = cfg_path.parent
     all_elements = []
     for s in entries:
-        atoms = read(resolve_relative(base, s["structure"]))
+        atoms = read_structure(resolve_relative(base, s["structure"]),
+                               s.get("structure_format", shared.get("structure_format")))
         for sym in atoms.get_chemical_symbols():
             el = sym.capitalize()
             if el not in all_elements:
@@ -244,7 +255,10 @@ def main():
         inp = swork / f"{suffix}.bind"
         log = swork / f"{suffix}.log"
         write_parameter_file(parm, ps)
-        write_periodic_input_generic(system["cif"], inp, system["path"], K, True, system["nelec"])
+        write_periodic_input_generic(system["cif"], inp, system["path"], K, True, system["nelec"],
+                                     overlap_images=system["overlap_images"],
+                                     periodic_dim=system["periodic_dim"],
+                                     structure_format=system["structure_format"])
         run_bind(BIND, inp, parm, log)
         _, model = parse_band(str(inp) + ".band")
         if model.shape != system["T"].shape or not np.isfinite(model).all():

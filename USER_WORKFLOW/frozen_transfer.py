@@ -9,11 +9,13 @@ from __future__ import annotations
 import argparse,csv,hashlib,json
 from pathlib import Path
 import numpy as np
-from ase.io import read
 from bands_fit import conf,read_nodes,csv_path,recompute,write_bands_plot
+from structure_io import (read_structure,resolved_structure_format,
+   STRUCTURE_FORMAT_CHOICES,STRUCTURE_FORMAT_HELP)
 from prepare_band_png import prepare,parse_bbox
 from generate_mc2d_multiband import read_colored_png
-from yaehmop_generic import parse_parameter_table,subset_for_elements,orbital_count,valence_electrons
+from yaehmop_generic import (parse_parameter_table,subset_for_elements,orbital_count,
+    valence_electrons,DEFAULT_OVERLAP_RADIUS)
 
 def sha(p:Path)->str:
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -33,7 +35,7 @@ def source_from_summary(path:Path)->tuple[Path,float,dict]:
 
 def evaluate(cif,ini,image,parameters,K,outdir,pairs,
              *,mode=None,bbox=None,colors=None,allow_ambiguous=False,
-             overlap_radius=4,source=None):
+             overlap_radius=DEFAULT_OVERLAP_RADIUS,source=None,structure_format=None):
     cif=Path(cif).resolve();ini=Path(ini).resolve();outdir=Path(outdir).resolve()
     if pairs not in (1,2,3,4):raise ValueError('pairs must be 1, 2, 3 or 4')
     if not cif.is_file():raise FileNotFoundError(cif)
@@ -61,7 +63,8 @@ def evaluate(cif,ini,image,parameters,K,outdir,pairs,
              + list(source.get('train_cif_sha256s',[]))):
         raise ValueError('Target CIF equals source training CIF; use direct evaluation, not frozen transfer')
     table=parse_parameter_table(native)
-    symbols=read(cif).get_chemical_symbols()
+    structure_format=resolved_structure_format(cif,structure_format)
+    symbols=read_structure(cif,structure_format).get_chemical_symbols()
     params=subset_for_elements(table,list(dict.fromkeys(symbols)))
     nelec=valence_electrons(params,symbols)
     norb=orbital_count(params,symbols)
@@ -70,7 +73,7 @@ def evaluate(cif,ini,image,parameters,K,outdir,pairs,
     if nocc<pairs or norb-nocc<pairs:
         raise ValueError('Requested frontier bands exceed the eligible physical orbital basis')
     # One real periodic calculation with no optimizer. Full orbitals saved.
-    k,all_bands=recompute(cif,c,native,float(K),outdir,overlap_radius)
+    k,all_bands=recompute(cif,c,native,float(K),outdir,overlap_radius,structure_format)
     rx,refs=read_colored_png(prepared,pairs,emin,emax,nx=r.getint('trace_nx',fallback=301))
     target=np.column_stack([np.interp(k,rx,refs[:,j]) for j in range(2*pairs)])
     ref_gap=float(target[:,pairs].min()-target[:,pairs-1].max())
@@ -91,7 +94,7 @@ def evaluate(cif,ini,image,parameters,K,outdir,pairs,
     report={
         'mode':'frozen_parameters_no_optimization',
         'warning':'Retrospective frozen evaluation; not necessarily prospective blind transfer.',
-        'target_cif':str(cif),'target_cif_sha256':sha(cif),
+        'target_cif':str(cif),'target_structure_format':structure_format,'target_cif_sha256':sha(cif),
         'target_reference':str(img),'target_reference_sha256':sha(img),
         'source_summary_supplied':source is not None,
         'source_train_cif_sha256':source.get('cif_sha256') if source else None,
@@ -114,7 +117,8 @@ def evaluate(cif,ini,image,parameters,K,outdir,pairs,
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('cif',type=Path)
+    p.add_argument('cif',type=Path,help='target crystal structure: CIF, VASP, Quantum ESPRESSO, SIESTA or FHI-aims file')
+    p.add_argument('--structure-format',choices=STRUCTURE_FORMAT_CHOICES,default='auto',help=STRUCTURE_FORMAT_HELP)
     p.add_argument('input_file',type=Path)
     choice=p.add_mutually_exclusive_group(required=True)
     choice.add_argument('--source-run',type=Path,
@@ -129,7 +133,8 @@ def main():
     p.add_argument('--bbox',help='L,T,R,B of real plot frame')
     p.add_argument('--colors',help='ordered actual color values for exactly 2*--pairs bands')
     p.add_argument('--allow-ambiguous',action='store_true')
-    p.add_argument('--overlap-radius',type=int,default=4)
+    p.add_argument('--overlap-radius',type=int,default=None,
+        help=f'Images per active lattice direction (default: source run value, else {DEFAULT_OVERLAP_RADIUS})')
     p.add_argument('--outdir',type=Path,default=Path('outputs/frozen_transfer'))
     args=p.parse_args()
     if args.source_run is not None:
@@ -139,10 +144,13 @@ def main():
         if args.k is None:p.error('--k is required when using --parameters')
         params,K,source=args.parameters,args.k,None
     pairs=args.pairs or int(conf(args.input_file)['fit'].get('n_pairs','1'))
+    radius=args.overlap_radius
+    if radius is None:
+        radius=int((source or {}).get('overlap_radius',DEFAULT_OVERLAP_RADIUS))
     evaluate(args.cif,args.input_file,args.png,params,K,args.outdir,pairs,
         mode=args.mode,bbox=args.bbox,colors=args.colors,
         allow_ambiguous=args.allow_ambiguous,
-        overlap_radius=args.overlap_radius,source=source)
+        overlap_radius=radius,source=source,structure_format=args.structure_format)
 
 if __name__=='__main__':
     main()

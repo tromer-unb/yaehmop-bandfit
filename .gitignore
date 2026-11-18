@@ -45,3 +45,5 @@ checkpoint/
 *.tar
 *.tar.gz
 *.zip
+# YAeHMOP sources and build cloned by install.sh --build-yaehmop
+third_party/

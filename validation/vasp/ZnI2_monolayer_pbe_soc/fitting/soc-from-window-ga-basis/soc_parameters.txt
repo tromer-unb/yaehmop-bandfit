@@ -1,0 +1,4 @@
+# on-site spin-orbit constants lambda (eV): H_SOC = lambda L.S
+# element shell lambda_eV
+I   p  0.612686
+I   d  0.000429

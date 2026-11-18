@@ -1,0 +1,27 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  In1      s            0  0
+     2  In1      px           1  1
+     3  In1      py           1 -1
+     4  In1      pz           1  0
+     5  In2      s            0  0
+     6  In2      px           1  1
+     7  In2      py           1 -1
+     8  In2      pz           1  0
+     9  S3       s            0  0
+    10  S3       px           1  1
+    11  S3       py           1 -1
+    12  S3       pz           1  0
+    13  S3       dx2-y2       2  2
+    14  S3       dz2          2  0
+    15  S3       dxy          2 -2
+    16  S3       dxz          2  1
+    17  S3       dyz          2 -1
+    18  S4       s            0  0
+    19  S4       px           1  1
+    20  S4       py           1 -1
+    21  S4       pz           1  0
+    22  S4       dx2-y2       2  2
+    23  S4       dz2          2  0
+    24  S4       dxy          2 -2
+    25  S4       dxz          2  1
+    26  S4       dyz          2 -1

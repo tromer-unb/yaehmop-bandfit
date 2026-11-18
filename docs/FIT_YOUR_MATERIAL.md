@@ -4,7 +4,8 @@
 
 What you provide:
 
-- **structure.cif** — your material's structure (MoS2, WS2, GeSe, etc.).
+- **structure.cif** — your material's structure (MoS2, WS2, GeSe, etc.). A VASP POSCAR/CONTCAR, Quantum ESPRESSO pw.x input/output, SIESTA .fdf/.XV/.STRUCT_OUT or FHI-aims geometry.in works too: see [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md).
+- **or, instead of an image, the DFT band-structure folder** (`--dft-dir`, `--dft-code vasp|qe|siesta|aims`): the raw eigenvalues are fitted; see [DFT_REFERENCE.md](DFT_REFERENCE.md).
 - **bands.png** — its reference DFT band plot, with known energy-axis limits and reciprocal path. Prefer a numeric CSV if available.
 - **file.ini** — a small configuration specifying the energy axis, k path, and number of selected bands.
 
@@ -171,7 +172,7 @@ If your only source is an unreadable image, [manual band digitization](IMAGE_INP
 | --image / --png | --png bands.png | Override reference source (same option) |
 | --pairs | --pairs 2 | 2 V + 2 C = 4 selected bands |
 | --budget | --budget 400 | Requested local physical YAeHMOP evaluations |
-| --optimizer | --optimizer nelder-mead | Staged differential evolution + local refinement |
+| --optimizer | --optimizer nelder-mead | Default: staged differential evolution + local refinement. Also differential-evolution, bayesian, cmaes, genetic, powell, simulated-annealing, sa-nelder-mead, hooke-jeeves ([details](CLI_REFERENCE.md#optimizers)) |
 | --mode | --mode colors | Decode auto, colors, mono, layered or csv |
 | --bbox | --bbox 100,80,920,650 | Pixel rectangle inside figure axes |
 | --colors | --colors '#c82d37,#1c7ad5' | True per-band curve colors |
@@ -180,7 +181,7 @@ If your only source is an unreadable image, [manual band digitization](IMAGE_INP
 | --from-fit | --from-fit path/fit.json | Re-run solver from saved fit and K |
 | --from-parameters | --from-parameters params.dat | Run solver using supplied native table |
 | --k | --k 1.75 | Required with --from-parameters |
-| --overlap-radius | --overlap-radius 5 | Neighbor-image radius in *recomputation* |
+| --overlap-radius | --overlap-radius 5 | Neighbor-image radius in fitting *and* recomputation (default 5) |
 | --seed | --seed 42 | Deterministic optimizer initialization |
 | --outdir | --outdir outputs/test | Result directory |
 

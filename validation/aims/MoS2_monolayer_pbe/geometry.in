@@ -1,0 +1,13 @@
+ lattice_vector      3.16288608     -0.00000000     -0.00000000
+ lattice_vector     -1.58180956      2.73894467      0.00000000
+ lattice_vector      0.00000000      0.00000000     16.00000000
+  constrain_relaxation .true.
+  #
+  # atomic positions
+  #
+ atom_frac       0.33330325      0.66663167      0.50000870 Mo
+ atom_frac       0.66668126      0.33334941      0.40179508 S
+ atom_frac       0.66668249      0.33335187      0.59819629 S
+
+
+
