@@ -329,9 +329,11 @@ Details in \cmd{docs/DFT\_REFERENCE.md}; real examples in \cmd{validation/}.
 \paragraph{Standard outputs of every fit.} Every fit writes \cmd{OUTDIR/fitting/} (or \cmd{--fitting-dir}):
 \cmd{parameters\_huckel.dat} (native YAeHMOP table) and \cmd{.txt}; \cmd{bands\_comparison.*} with the reference
 in blue (solid), EHT in red (dashed) and RMSE, MAE, max $|\Delta E|$ and the gap error in the figure;
-\cmd{bands\_full\_comparison.*} (all DFT and EHT bands); \cmd{hamiltonian\_overlap.npz} with the YAeHMOP
-$H(\mathbf k)$ and $S(\mathbf k)$ (complex, at the k points of the figure, with orbital labels; their
-generalized eigenvalues reproduce the fitted bands); \cmd{fit\_summary.json}.
+\cmd{bands\_full\_comparison.*} (all DFT and EHT bands); \cmd{tb-NP.dat} and \cmd{basis\_set-NP} with the
+YAeHMOP $H(\mathbf R)$ and $S(\mathbf R)$ in the WanTiBEXOS text format, recovered exactly from $H(\mathbf k)$,
+$S(\mathbf k)$ on the $(2r+1)^{d}$ mesh ($r$ = overlap radius; \cmd{ReH} is $H(\mathbf R)-E_{\rm mid}S(\mathbf R)$ with
+$E_F=0$, because \cmd{wtb.x} diagonalizes $(H-E_F I, S)$); \cmd{hamiltonian\_overlap\_k.dat} with
+$H(\mathbf k)$, $S(\mathbf k)$ at the high-symmetry points; \cmd{fit\_summary.json}. All are plain text.
 
 \subsection{Numerical CSV (preferred reference)}
 

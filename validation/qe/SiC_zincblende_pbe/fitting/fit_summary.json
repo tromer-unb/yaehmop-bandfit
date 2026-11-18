@@ -75,9 +75,23 @@
   "figure": "bands_comparison.png",
   "full_figure": "bands_full_comparison.png",
   "note": "Raw DFT eigenvalues interpolated at the YAeHMOP k points; trained only 2*n_pairs frontier bands",
-  "hamiltonian_overlap": {
-    "file": "hamiltonian_overlap.npz",
-    "n_kpoints": 166,
-    "n_orbitals": 8
+  "tight_binding_files": {
+    "n_orbitals": 8,
+    "n_cells": 381,
+    "overlap_radius": 5,
+    "mesh_points": 1331,
+    "max_error_rebuilt_Hk_eV": 1.7547495271275082e-06,
+    "max_error_rebuilt_Sk": 1.0297498809208605e-07,
+    "eht_vbm_eV": -12.213794838916762,
+    "eht_cbm_eV": -11.113495454160145,
+    "eht_midgap_eV": -11.663645146538453,
+    "tb_NP_energy_zero": "H(R) in tb-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
+    "high_symmetry_k_in_hamiltonian_overlap_k": 12,
+    "files": [
+      "tb-NP.dat",
+      "basis_set-NP",
+      "orbitals.dat",
+      "hamiltonian_overlap_k.dat"
+    ]
   }
 }

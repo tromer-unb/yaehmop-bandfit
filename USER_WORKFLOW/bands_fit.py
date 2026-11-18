@@ -229,6 +229,13 @@ def recompute(cif,config,parameters,K,outdir,overlap_radius=DEFAULT_OVERLAP_RADI
     print("FIGURE",outdir/"bands_full.png")
     return k,E
 
+def node_positions(n_nodes,n,mask=None):
+    """Index of each band-path node among the (masked) path k points."""
+    idx=[j*n for j in range(n_nodes)]
+    if mask is None:return idx
+    pos=np.cumsum(mask)-1
+    return [int(pos[i]) for i in idx if mask[i]]
+
 def path_kpoints(nodes,n):
     """The k points YAeHMOP uses for a Band block (n per line, last node added)."""
     nodes=np.asarray(nodes,float);ks=[]
@@ -237,50 +244,122 @@ def path_kpoints(nodes,n):
     ks.append(nodes[-1])
     return np.array(ks)
 
-def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,out_npz):
-    """YAeHMOP H(k) and S(k) for the final parameters, saved as complex arrays.
+def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None):
+    """Text files with the YAeHMOP Hamiltonian and overlap of the final parameters.
 
-    One extra YAeHMOP run with a 'K points' block and Dump Hamil/Overlap; the
-    generalized eigenvalues of (H, S) are stored too and checked to be real.
+    Two extra YAeHMOP runs ('K points' + Dump Hamil/Overlap): the full
+    Gamma-centred mesh of (2r+1)^dim points, from which H(R) and S(R) of all
+    cells within the overlap radius r are recovered exactly, and the k points
+    of the figure (to check that H(R), S(R) reproduce YAeHMOP's H(k), S(k)
+    and its bands). Written for WanTiBEXOS (tb-NP.dat, basis_set-NP) and as
+    plain tables of H(k), S(k) at the high-symmetry points.
     """
     import shutil,tempfile,scipy.linalg as sl
+    from yaehmop_generic import real_space_matrices,gamma_mesh,ORBITAL_LM
     bind,_=resolve_yaehmop_assets()
     atoms=read_structure(structure,sfmt);syms=atoms.get_chemical_symbols()
     params=subset_for_elements(parse_parameter_table(parameters),list(dict.fromkeys(syms)))
-    nelec=valence_electrons(params,syms)
+    nelec=valence_electrons(params,syms);nocc=nelec//2
+    images=overlap_images_for(dim,radius)
+    mesh=gamma_mesh(dim,radius);kpoints=np.asarray(kpoints,float)
+    def dump(ks,tmp,tag):
+        write_parameter_file(tmp/"p.parms",params)
+        inp=write_periodic_input_generic(structure,tmp/f"{tag}.bind",None,float(K),True,nelec,
+            overlap_images=images,periodic_dim=dim,structure_format=sfmt,kpoints=ks)
+        run_bind(bind,inp,tmp/"p.parms",tmp/f"{tag}.log")
+        return read_matrix_dump(str(inp)+".HAM"),read_matrix_dump(str(inp)+".OV"),inp
     with tempfile.TemporaryDirectory() as tmp:
         tmp=Path(tmp)
-        write_parameter_file(tmp/"p.parms",params)
-        inp=write_periodic_input_generic(structure,tmp/"yaehmop_matrices.bind",None,float(K),True,nelec,
-            overlap_images=overlap_images_for(dim,radius),periodic_dim=dim,structure_format=sfmt,kpoints=kpoints)
-        run_bind(bind,inp,tmp/"p.parms",tmp/"run.log")
-        H=read_matrix_dump(str(inp)+".HAM");S=read_matrix_dump(str(inp)+".OV")
-        shutil.copy(inp,Path(out_npz).parent/"yaehmop_matrices.bind")
-    if H.shape!=(len(kpoints),)+H.shape[1:]:
-        raise ValueError("YAeHMOP matrix dump has an unexpected number of k points")
-    eig=np.array([sl.eigh(H[q],S[q],eigvals_only=True) for q in range(len(H))])
-    labels=orbital_labels(params,syms)
-    np.savez_compressed(out_npz,H_k=H,S_k=S,kpoints_frac=np.asarray(kpoints),eigenvalues_eV=eig,
-        orbital_labels=np.array(labels),K_EHT=float(K),periodic_dim=int(dim),
-        overlap_images=np.array(overlap_images_for(dim,radius)),
-        units="H_k in eV, S_k dimensionless; k in fractional reciprocal coordinates")
-    return H.shape
+        Hm,Sm,_=dump(mesh,tmp,"mesh")
+        Hp,Sp,inp=dump(kpoints,tmp,"path")
+        shutil.copy(inp,Path(fdir)/"yaehmop_matrices.bind")
+    cells=real_space_matrices(Hm,Sm,mesh,dim,radius)
+    imag=max(max(np.abs(H.imag).max(),np.abs(S.imag).max()) for _,H,S in cells)
+    if imag>1e-6:raise ValueError(f"H(R)/S(R) not real (max imaginary part {imag:.2e})")
+    kept=[(R,H.real,S.real) for R,H,S in cells if max(np.abs(H).max(),np.abs(S).max())>1e-7]
+    # Check: H(R), S(R) rebuild YAeHMOP's H(k), S(k) on the figure path
+    def rebuild(q,which):
+        return sum(np.exp(2j*np.pi*(q@R))*(H if which=="H" else S) for R,H,S in kept)
+    errH=max(np.abs(rebuild(q,"H")-Hp[i]).max() for i,q in enumerate(kpoints))
+    errS=max(np.abs(rebuild(q,"S")-Sp[i]).max() for i,q in enumerate(kpoints))
+    eig=np.array([sl.eigh(Hp[i],Sp[i],eigvals_only=True) for i in range(len(kpoints))])
+    eigm=np.array([sl.eigh(Hm[i],Sm[i],eigvals_only=True) for i in range(len(mesh))])
+    allE=np.vstack([eig,eigm]);vbm=float(allE[:,nocc-1].max());cbm=float(allE[:,nocc].min())
+    mid=.5*(vbm+cbm)
+    labels=orbital_labels(params,syms);n=len(labels)
+    cell=np.asarray(atoms.cell)
+    fdir=Path(fdir)
+    # WanTiBEXOS non-orthogonal TB file (same layout as siesta2wtb.py, spinless 'NP').
+    # wtb.x diagonalizes (H(k) - E_F*I, S(k)), which is not a rigid shift when S != I;
+    # so H(R) is written as H(R) - E_mid*S(R) with E_F = 0: wtb.x then gives exactly
+    # the YAeHMOP eigenvalues minus the EHT midgap (bands below 0 = occupied).
+    with open(fdir/"tb-NP.dat","w") as f:
+        f.write("NP\n0.000000\n0.000000\n")
+        for v in cell:f.write(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n")
+        f.write(f"{n}\n{len(kept)}\n#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
+        for R,H,S in kept:
+            r=R@cell;Hs=H-mid*S
+            for i in range(n):
+                for j in range(n):
+                    f.write(f"{r[0]:.8f}   {r[1]:.8f}   {r[2]:.8f}   {i+1}   {j+1}   "
+                            f"{Hs[i,j]:.10f}   0.0000000000   {S[i,j]:.10f}\n")
+    pos=atoms.positions
+    with open(fdir/"basis_set-NP","w") as f:
+        f.write("bindex aspecie ax ay az l m spin\n")
+        for b,lab in enumerate(labels):
+            atom,orb=lab.split(":");ia=int("".join(c for c in atom if c.isdigit()))-1
+            l,m=ORBITAL_LM[orb]
+            f.write(f"{b+1}   {syms[ia]}   {pos[ia,0]:.8f}   {pos[ia,1]:.8f}   {pos[ia,2]:.8f}   {l}   {m}   0\n")
+    with open(fdir/"orbitals.dat","w") as f:
+        f.write("# index  atom  orbital  l  m   (YAeHMOP order)\n")
+        for b,lab in enumerate(labels):
+            atom,orb=lab.split(":");l,m=ORBITAL_LM[orb]
+            f.write(f"{b+1:6d}  {atom:8s} {orb:12s} {l} {m:2d}\n")
+    nodes=sorted(set(node_index or [0,len(kpoints)-1]))
+    with open(fdir/"hamiltonian_overlap_k.dat","w") as f:
+        f.write("# YAeHMOP H(k) [eV] and S(k) at the high-symmetry points of the band figure\n"
+                "# convention: H(k) = sum_R exp(i 2pi k.R) H(R); k in fractional reciprocal coordinates\n"
+                "# H(R), S(R) for all R: tb-NP.dat ; orbitals: orbitals.dat\n"
+                "# k1 k2 k3   i   j   ReH   ImH   ReS   ImS\n")
+        for q in nodes:
+            k=kpoints[q]
+            for i in range(n):
+                for j in range(n):
+                    f.write(f"{k[0]:.8f} {k[1]:.8f} {k[2]:.8f}   {i+1}   {j+1}   {Hp[q][i,j].real:.10f}   "
+                            f"{Hp[q][i,j].imag:.10f}   {Sp[q][i,j].real:.10f}   {Sp[q][i,j].imag:.10f}\n")
+    return dict(n_orbitals=n,n_cells=len(kept),overlap_radius=int(radius),mesh_points=len(mesh),
+                max_error_rebuilt_Hk_eV=float(errH),max_error_rebuilt_Sk=float(errS),
+                eht_vbm_eV=vbm,eht_cbm_eV=cbm,eht_midgap_eV=mid,
+                tb_NP_energy_zero="H(R) in tb-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
+                high_symmetry_k_in_hamiltonian_overlap_k=len(nodes))
 
-FITTING_README="""Outputs of one EHT (YAeHMOP) fit
+FITTING_README="""Outputs of one EHT (YAeHMOP) fit (all plain text except the figures)
 ================================
 parameters_huckel.dat    fitted parameters in the native YAeHMOP table format
                          (use with: bind input.bind parameters_huckel.dat)
 parameters_huckel.txt    K_EHT and every fitted variable (name value)
-fit_summary.json         errors, gaps, optimizer, reference and structure used
+fit_summary.json         errors, gaps, optimizer, reference, structure, checks
 bands_comparison.*       fitted bands: reference blue (solid), EHT red (dashed),
                          with RMSE / MAE / max |dE| / gap error in the figure
 bands_full_comparison.*  (DFT references) all DFT and EHT bands in a window
-hamiltonian_overlap.npz  YAeHMOP Hamiltonian H(k) [eV] and overlap S(k), complex
-                         arrays (nk, norb, norb) at the k points of the figure,
-                         with kpoints_frac, orbital_labels, eigenvalues_eV
-                         (generalized eigenvalues of H, S) and K_EHT.
-                         Python: d=numpy.load('hamiltonian_overlap.npz'); d['H_k'][0]
-yaehmop_matrices.bind    YAeHMOP input that produced the matrices (K points block)
+tb-NP.dat                real-space YAeHMOP Hamiltonian and overlap S(R) in the
+                         WanTiBEXOS format (as siesta2wtb.py): NP / scissors /
+                         Fermi level (0) / 3 lattice vectors [A] / n orbitals /
+                         n cells / then for every cell and orbital pair:
+                         R_x R_y R_z [A]  i  j  ReH  ImH  S
+                         ReH is H(R) - E_mid*S(R) (E_mid = EHT midgap, in
+                         fit_summary.json): energies are relative to midgap and
+                         wtb.x reproduces YAeHMOP's bands exactly (wtb.x uses
+                         H - E_F*I, which is not a shift when S != I).
+basis_set-NP             WanTiBEXOS basis file: index species x y z [A] l m spin
+orbitals.dat             orbital index, atom, orbital, l, m (YAeHMOP order)
+hamiltonian_overlap_k.dat  H(k), S(k) at the high-symmetry points of the figure:
+                         k1 k2 k3 i j ReH ImH ReS ImS, H(k)=sum_R e^{i2pi k.R} H(R)
+yaehmop_matrices.bind    YAeHMOP input of the matrix run (K points + Dump)
+
+H(R), S(R) are recovered exactly from YAeHMOP's H(k), S(k) on the full
+(2r+1)^dim mesh (r = overlap radius); fit_summary.json reports how well they
+rebuild YAeHMOP's H(k), S(k) on the band path (round-off level).
 """
 
 def portable_paths(obj,fdir):
@@ -300,7 +379,7 @@ def portable_paths(obj,fdir):
             return q.name+tail
     return obj
 
-def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,dim,radius,summary):
+def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,dim,radius,summary,node_index=None):
     """Standard output folder of every fit: parameters, figures, H(k) and S(k)."""
     import shutil
     fdir=Path(fdir);fdir.mkdir(parents=True,exist_ok=True)
@@ -313,9 +392,11 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
               "bands_full_comparison.png","bands_full_comparison.pdf","bands_full_comparison.csv"):
         if (Path(outdir)/f).is_file() and Path(outdir).resolve()!=fdir.resolve():
             shutil.copy(Path(outdir)/f,fdir/f)
-    shape=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir/"hamiltonian_overlap.npz")
-    summary=dict(summary,hamiltonian_overlap=dict(file="hamiltonian_overlap.npz",n_kpoints=int(shape[0]),
-                                                  n_orbitals=int(shape[1])))
+    for old_file in ("hamiltonian_overlap.npz",):
+        if (fdir/old_file).exists():(fdir/old_file).unlink()
+    info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index)
+    summary=dict(summary,tight_binding_files=dict(info,files=["tb-NP.dat","basis_set-NP","orbitals.dat",
+                                                              "hamiltonian_overlap_k.dat"]))
     summary=portable_paths(json.loads(json.dumps(summary,default=str)),fdir)
     (fdir/"fit_summary.json").write_text(json.dumps(summary,indent=2)+"\n")
     (fdir/"README.txt").write_text(FITTING_README)
@@ -483,7 +564,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
         write_fitting_dir(args.fitting_dir or outdir/"fitting",outdir,structure=cif,sfmt=sfmt,
             native=table,param_txt=ptxt,K=K,kpoints=path_kpoints(er.nodes,step)[er.mask],dim=dim,
             radius=int(radius),summary=dict(name=name,mode="evaluation (no refit)",parameters=str(table),
-            K_EHT=K,metrics=met,dft_reference=info))
+            K_EHT=K,metrics=met,dft_reference=info),node_index=node_positions(len(er.nodes),step,er.mask))
         print("DFT_EVALUATION_DONE",name,"RMSE_eV",round(met["selected_rmse_eV"],5),
               "gap_error_eV",round(met["gap_error_eV"],4))
         print("BANDS_PLOT",outdir/"bands_comparison.png");print("FULL_PLOT",outdir/"bands_full_comparison.png")
@@ -518,7 +599,8 @@ def dft_main(args,parser,config,inputs,dft_dir):
     write_fitting_dir(args.fitting_dir or outdir/"fitting",outdir,structure=cif,sfmt=sfmt,
         native=outdir/"fit/param_best_native.dat",param_txt=outdir/"fit/param_best.txt",
         K=state["best_x"]["GLOBAL__K"],kpoints=path_kpoints(er.nodes,step)[er.mask],dim=dim,
-        radius=int(radius),summary=dict(name=name,metrics=met,**status))
+        radius=int(radius),summary=dict(name=name,metrics=met,**status),
+        node_index=node_positions(len(er.nodes),step,er.mask))
     print("USER_FIT_DONE",name,"bands",2*pairs,"RMSE_eV",round(rmse,5))
     print("BEST_PARAMS",outdir/"fit/param_best_native.dat")
     print("BANDS_PLOT",outdir/"bands_comparison.png")
@@ -711,7 +793,7 @@ def main():
     write_fitting_dir(args.fitting_dir or outdir/"fitting",outdir,structure=cif,sfmt=sfmt,
         native=outdir/"fit/param_best_native.dat",param_txt=outdir/"fit/param_best.txt",
         K=state["best_x"]["GLOBAL__K"],kpoints=path_kpoints(xyz,step),dim=dim,radius=int(radius),
-        summary=dict(status,name=name))
+        summary=dict(status,name=name),node_index=node_positions(len(xyz),step))
     print("USER_FIT_DONE",name,"bands",2*pairs,
           "RMSE_eV",round(objective_rmse,5))
     print("BEST_PARAMS",outdir/"fit/param_best_native.dat")

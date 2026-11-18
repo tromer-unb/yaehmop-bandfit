@@ -1,0 +1,9 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  Si1      s            0  0
+     2  Si1      px           1  1
+     3  Si1      py           1 -1
+     4  Si1      pz           1  0
+     5  Si2      s            0  0
+     6  Si2      px           1  1
+     7  Si2      py           1 -1
+     8  Si2      pz           1  0

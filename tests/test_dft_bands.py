@@ -246,7 +246,7 @@ class MatrixDumpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             f=Path(tmp)/"x.HAM"
             f.write_bytes(np.array([nk,n],np.int32).tobytes()+packed.astype(np.float64).tobytes())
-            np.testing.assert_allclose(read_matrix_dump(f),H)
+            np.testing.assert_allclose(read_matrix_dump(f),np.conj(H))  # usual e^{+ik.R} convention
         params={"Mo":{"s":{},"p":{},"d":{}},"S":{"s":{},"p":{}}}
         lab=orbital_labels(params,["Mo","S","S"])
         self.assertEqual(len(lab),9+4+4)

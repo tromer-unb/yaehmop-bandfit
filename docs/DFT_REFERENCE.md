@@ -72,19 +72,32 @@ Every fit of `bands_fit.py` (DFT, image or CSV reference) writes, by default to
 | `parameters_huckel.txt` | `K_EHT` and every fitted variable |
 | `bands_comparison.png/pdf/csv` | fitted bands: reference **blue solid**, EHT **red dashed**; RMSE, MAE, max \|ΔE\| and gaps/gap error in the figure |
 | `bands_full_comparison.png/pdf/csv` | (DFT) all DFT and EHT bands in the `[reference] emin/emax` window |
-| `hamiltonian_overlap.npz` | YAeHMOP **H(k)** (eV) and **S(k)**, complex `(nk, norb, norb)`, at the k points of the figure; `kpoints_frac`, `orbital_labels` (e.g. `Mo1:dz2`), `eigenvalues_eV`, `K_EHT` |
-| `yaehmop_matrices.bind` | YAeHMOP input that produced H and S (`K points` + `Dump Hamil/Overlap`) |
-| `fit_summary.json`, `README.txt` | metrics, settings, sources; file description |
+| `tb-NP.dat` | real-space **H(R)** and **S(R)** of YAeHMOP, plain text in the **WanTiBEXOS** non-orthogonal format (same as `siesta2wtb.py`; use `DFT= S`, `PARAMS_FILE= "tb-NP.dat"`) |
+| `basis_set-NP` | WanTiBEXOS basis file: index, species, x y z (Å), l, m, spin |
+| `orbitals.dat` | orbital index, atom, orbital name, l, m |
+| `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points: `k1 k2 k3 i j ReH ImH ReS ImS` |
+| `yaehmop_matrices.bind` | YAeHMOP input of the matrix run (`K points` + `Dump Hamil/Overlap`) |
+| `fit_summary.json`, `README.txt` | metrics, settings, sources, checks; file description |
 
-H and S come from one extra YAeHMOP run with the final parameters; the
-generalized eigenvalues of (H, S) reproduce the fitted bands (checked to 10⁻⁶ eV).
-Orbital order is YAeHMOP's: s; px, py, pz; dx²−y², dz², dxy, dxz, dyz.
+All files are plain text except the figures.
 
-```python
-import numpy as np
-d = np.load("fitting/hamiltonian_overlap.npz")
-H, S, k = d["H_k"], d["S_k"], d["kpoints_frac"]
-```
+**How H(R), S(R) are obtained.** YAeHMOP only writes H(k), S(k) (binary dumps of a
+`K points` run). Its lattice sums stop at the overlap radius r, so H(R) and S(R)
+for all cells −r…r are recovered **exactly** by a Fourier transform of H(k), S(k)
+on the full Γ-centred mesh of (2r+1)^dim points. Convention:
+H(k) = Σ_R e^{i2πk·R} H(R), H_ij(R) = ⟨φ_i(0)|H|φ_j(R)⟩ (checked against
+interatomic distances). `fit_summary.json` reports how well H(R), S(R) rebuild
+YAeHMOP's H(k), S(k) on the band path (≈10⁻⁷ eV; cells whose elements are all
+below 10⁻⁷ are omitted).
+
+**Energy zero of `tb-NP.dat`.** `wtb.x` diagonalizes (H(k) − E_F·I, S(k)), which
+is not a rigid shift in a non-orthogonal basis. The file therefore holds
+H(R) − E_mid·S(R) with E_F = 0, where E_mid is the EHT midgap (`eht_midgap_eV`
+in `fit_summary.json`): `wtb.x` reproduces the YAeHMOP bands relative to midgap
+(checked for MoS₂: 10⁻⁴ eV near the gap, single-precision level). Add E_mid for
+absolute YAeHMOP energies; `hamiltonian_overlap_k.dat` has the unshifted values.
+Orbital order is YAeHMOP's: s; px, py, pz; dx²−y², dz², dxy, dxz, dyz
+(l, m as in sisl: px m=1, py m=−1, pz m=0; dxy −2, dyz −1, dz² 0, dxz 1, dx²−y² 2).
 
 ## Validation examples
 

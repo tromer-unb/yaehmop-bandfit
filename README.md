@@ -58,7 +58,7 @@ python3 quick.py
 
 Provide **structure.cif** + **bands.png** (or exact numeric CSV), edit one **file.ini** containing the plot energy limits and **correct reciprocal path**, and run:
 
-> **Raw DFT data as reference:** point the program to the folder of a VASP, Quantum ESPRESSO, SIESTA or FHI-aims band-structure calculation (`--dft-dir FOLDER --dft-code vasp|qe|siesta|aims`) and it fits to the eigenvalues themselves, no image needed. Every fit writes `OUTDIR/fitting/` with the Hückel parameters, the comparison figures (reference blue, EHT red dashed, errors in the figure) and the YAeHMOP Hamiltonian and overlap matrices. See [DFT references](docs/DFT_REFERENCE.md) and the examples in [validation/](validation/README.md).
+> **Raw DFT data as reference:** point the program to the folder of a VASP, Quantum ESPRESSO, SIESTA or FHI-aims band-structure calculation (`--dft-dir FOLDER --dft-code vasp|qe|siesta|aims`) and it fits to the eigenvalues themselves, no image needed. Every fit writes `OUTDIR/fitting/` with the Hückel parameters, the comparison figures (reference blue, EHT red dashed, errors in the figure) and the YAeHMOP Hamiltonian and overlap matrices as plain text (`tb-NP.dat` in the WanTiBEXOS format). See [DFT references](docs/DFT_REFERENCE.md) and the examples in [validation/](validation/README.md).
 
 > Instead of a CIF you can give the structure file of **VASP** (POSCAR/CONTCAR/OUTCAR/vasprun.xml), **Quantum ESPRESSO** (pw.x input, any `ibrav`, or output), **SIESTA** (.fdf/.XV/.STRUCT_OUT) or **FHI-aims** (geometry.in/output); the format is detected automatically. See [structure formats](docs/STRUCTURE_FORMATS.md).
 
