@@ -1,0 +1,18 @@
+# index  atom  orbital  l  m   (YAeHMOP order; spinor basis: these n spin up, then spin down)
+     1  Mo1      s            0  0
+     2  Mo1      px           1  1
+     3  Mo1      py           1 -1
+     4  Mo1      pz           1  0
+     5  Mo1      dx2-y2       2  2
+     6  Mo1      dz2          2  0
+     7  Mo1      dxy          2 -2
+     8  Mo1      dxz          2  1
+     9  Mo1      dyz          2 -1
+    10  S2       s            0  0
+    11  S2       px           1  1
+    12  S2       py           1 -1
+    13  S2       pz           1  0
+    14  S3       s            0  0
+    15  S3       px           1  1
+    16  S3       py           1 -1
+    17  S3       pz           1  0
