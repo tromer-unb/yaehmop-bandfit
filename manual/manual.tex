@@ -294,6 +294,45 @@ reg_weight = 0.04
         \cmd{Lattice 3}); see section~\ref{sec:lattice}.
 \end{itemize}
 
+\subsection{Raw DFT band data (VASP, QE, SIESTA, FHI-aims)}\label{sec:dft}
+
+The reference can be the folder of a DFT band-structure calculation. The eigenvalues, the k points, the
+structure and the number of occupied bands are read from the files; no image is involved:
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir path/to/bands --dft-code vasp \
+  --outdir outputs/material
+\end{lstlisting}
+The INI file needs only \cmd{[fit]} (template \cmd{examples/configs/dft\_template.ini}); the structure argument is
+optional (the DFT structure is used).
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L L}
+\toprule
+Code & Eigenvalues and k points & Occupied bands / labels \\
+\midrule
+VASP & \cmd{vasprun.xml} or \cmd{EIGENVAL} (+ \cmd{POSCAR}) & \cmd{NELECT}; line-mode \cmd{KPOINTS} \\
+QE & XML of the \cmd{bands} run, pw.x output, or \cmd{bands.x} file & \cmd{nelec}; \cmd{crystal\_b} with \cmd{! label} \\
+SIESTA & \cmd{.bands} + \cmd{.fdf} with \cmd{BandLines} & Fermi level; \cmd{BandLines} \\
+FHI-aims & \cmd{band1001.out}\ldots{} + \cmd{control.in} & occupations; \cmd{output band} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Each straight DFT segment becomes a YAeHMOP band line (\cmd{points\_per\_segment} points) and the DFT
+eigenvalues are interpolated at exactly those k points; discontinuities (\cmd{X|U}) are computed but excluded
+from the error. The periodic dimension is detected from the vacuum unless given. Spin--orbit and
+spin-polarized (different channels) references and metals are refused; FHI-aims \cmd{*.no\_soc} files are used
+when present. \cmd{--from-fit} or \cmd{--from-parameters} with \cmd{--dft-dir} evaluate existing parameters.
+Details in \cmd{docs/DFT\_REFERENCE.md}; real examples in \cmd{validation/}.
+
+\paragraph{Standard outputs of every fit.} Every fit writes \cmd{OUTDIR/fitting/} (or \cmd{--fitting-dir}):
+\cmd{parameters\_huckel.dat} (native YAeHMOP table) and \cmd{.txt}; \cmd{bands\_comparison.*} with the reference
+in blue (solid), EHT in red (dashed) and RMSE, MAE, max $|\Delta E|$ and the gap error in the figure;
+\cmd{bands\_full\_comparison.*} (all DFT and EHT bands); \cmd{hamiltonian\_overlap.npz} with the YAeHMOP
+$H(\mathbf k)$ and $S(\mathbf k)$ (complex, at the k points of the figure, with orbital labels; their
+generalized eigenvalues reproduce the fitted bands); \cmd{fit\_summary.json}.
+
 \subsection{Numerical CSV (preferred reference)}
 
 A CSV avoids every ambiguity of a raster image. The header must be exactly
@@ -681,6 +720,10 @@ extensions (graphene, phagraphene, diamond, graphite) use other PBE sources and 
 \midrule
 cif, input\_file & structure (any format of section~\ref{sec:structure}) and INI settings (positional) \\
 --structure-format & force the structure format (default \cmd{auto}) \\
+--dft-dir, --dft-code & raw DFT band data as reference (section~\ref{sec:dft}) \\
+--dft-file, --valence-bands & band file to use; occupied DFT bands \\
+--dimension & periodic dimension of a DFT reference \\
+--fitting-dir & folder of the standard fit outputs (default \cmd{OUTDIR/fitting}) \\
 --image, --png & reference image or CSV instead of \cmd{[reference] image} \\
 --pairs \{1,2,3,4\} & valence and conduction bands on \emph{each} side \\
 --mode & \cmd{auto}, \cmd{layered}, \cmd{colors}, \cmd{mono}, \cmd{csv} \\

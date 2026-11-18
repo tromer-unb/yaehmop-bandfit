@@ -5,6 +5,7 @@
 What you provide:
 
 - **structure.cif** — your material's structure (MoS2, WS2, GeSe, etc.). A VASP POSCAR/CONTCAR, Quantum ESPRESSO pw.x input/output, SIESTA .fdf/.XV/.STRUCT_OUT or FHI-aims geometry.in works too: see [STRUCTURE_FORMATS.md](STRUCTURE_FORMATS.md).
+- **or, instead of an image, the DFT band-structure folder** (`--dft-dir`, `--dft-code vasp|qe|siesta|aims`): the raw eigenvalues are fitted; see [DFT_REFERENCE.md](DFT_REFERENCE.md).
 - **bands.png** — its reference DFT band plot, with known energy-axis limits and reciprocal path. Prefer a numeric CSV if available.
 - **file.ini** — a small configuration specifying the energy axis, k path, and number of selected bands.
 

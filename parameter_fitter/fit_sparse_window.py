@@ -16,6 +16,7 @@ from pathlib import Path
 import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
 from structure_io import read_structure,resolved_structure_format
+from dft_bands import load_reference,eht_reference
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -37,6 +38,8 @@ def parse_sample(e,root,defaults,shared):
     png=(root/e["reference"]).resolve()
     sfmt=e.get("structure_format",shared.get("structure_format"))
     atoms=read_structure(cif,sfmt);syms=atoms.get_chemical_symbols()
+    if e.get("reference_format",shared.get("reference_format","image"))=="dft":
+        return parse_dft_sample(e,root,defaults,shared,cif,png,sfmt,atoms)
     params={k:defaults[k] for k in set(syms)}
     norb=orbital_count(params,syms)
     nelec=valence_electrons(params,syms)
@@ -87,6 +90,46 @@ def parse_sample(e,root,defaults,shared):
       png_hash=hashlib.sha256(png.read_bytes()).hexdigest(),
       cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
 
+def parse_dft_sample(e,root,defaults,shared,cif,ref_path,sfmt,atoms):
+    """Numerical DFT reference (.npz from dft_bands.save_reference).
+
+    YAeHMOP runs on a path through the DFT segments; the DFT eigenvalues are
+    interpolated at exactly those k points. Points on the connecting line of a
+    discontinuity (X|U) are computed but excluded through s["kmask"].
+    """
+    syms=atoms.get_chemical_symbols()
+    params={k:defaults[k] for k in set(syms)}
+    norb=orbital_count(params,syms)
+    nelec=valence_electrons(params,syms)
+    if nelec%2:raise ValueError("spinless YAeHMOP needs even nelec")
+    nocc=nelec//2
+    p=int(e.get("n_pairs",shared.get("n_pairs",2)))
+    if p not in (1,2,3,4):raise ValueError("P5 N must be 1,2,3,4")
+    if min(nocc,norb-nocc)<p:
+        raise ValueError(f"{e['name']} requires {p} conduction/valence orbitals; EHT only has {norb-nocc} conduction")
+    dim=int(e.get("point_dim",3))
+    radius=int(e.get("overlap_radius",shared.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)))
+    images=overlap_images_for(dim,radius)
+    n=int(e.get("points_per_line",shared.get("points_per_line",20)))
+    ref=load_reference(ref_path,atoms)
+    er=eht_reference(ref,n,dim)
+    dn=ref.nocc;T=er.energies
+    if dn<p or T.shape[1]-dn<p:
+        raise ValueError(f"{e['name']}: the DFT data has {dn} occupied and {T.shape[1]-dn} empty bands; "
+                         f"{p}+{p} requested")
+    target=T[:,dn-p:dn+p].copy()
+    tv=float(target[:,p-1].max());tc=float(target[:,p].min())
+    if tc-tv<.02:raise ValueError(e["name"]+": no positive DFT gap on the path")
+    mid=.5*(tv+tc)
+    return dict(name=e["name"],cif=cif,png=ref_path,symbols=syms,
+      elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=nocc,
+      path=BandPath(tuple(er.labels),er.nodes,n),kx=er.x,kmask=er.mask,
+      target=target-mid,target_all=T-mid,dft_nocc=dn,ticks=er.ticks,
+      n_pairs=p,gap=tc-tv,weight=float(e.get("weight",1.)),
+      periodic_dim=dim,overlap_images=images,structure_format=sfmt,
+      png_hash=hashlib.sha256(ref_path.read_bytes()).hexdigest(),
+      cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
+
 def write_sample_input(s,inp,k):
     """Native periodic input for one sample, honouring its dimensionality."""
     return write_periodic_input_generic(s["cif"],inp,s["path"],k,True,s["nelec"],
@@ -95,6 +138,10 @@ def write_sample_input(s,inp,k):
 
 def scores(bands,s):
     n=s["nocc"]
+    if s.get("kmask") is not None:
+        if bands.shape!=(len(s["kmask"]),s["norb"]):
+            raise ValueError("physical EHT spectrum shape mismatch")
+        bands=bands[s["kmask"]]
     if bands.shape!=(len(s["kx"]),s["norb"]):
         raise ValueError("physical EHT spectrum shape mismatch")
     gap=float(bands[:,n].min()-bands[:,n-1].max())
@@ -187,11 +234,21 @@ class Fitter:
                 specs.append(parse_sample(e,self.base,self.stockparams,self.conf))
         result={}
         for s in specs:
-            met,b=scores(self.run(s,params,K,"final_eigen"),s)
+            full=self.run(s,params,K,"final_eigen")
+            met,b=scores(full,s)
             met["role"]="train" if s["name"] in [t["name"] for t in self.train] else "test"
             result[s["name"]]=met
+            extra={}
+            if s.get("target_all") is not None:
+                # Whole spectra for the full comparison figure, each relative to its midgap
+                E=full[s["kmask"]];n=s["nocc"]
+                emid=.5*(float(E[:,n].min())+float(E[:,n-1].max()))
+                extra=dict(reference_all=s["target_all"],YAeHMOP_all=E-emid,
+                           tick_x=np.array([x for x,_ in s["ticks"]],float),
+                           tick_labels=np.array([l for _,l in s["ticks"]]),
+                           dft_nocc=s["dft_nocc"],eht_nocc=n,n_pairs=s["n_pairs"])
             np.savez_compressed(self.out/(s["name"]+"_bands.npz"),k=s["kx"],
-                                reference=s["target"],YAeHMOP=b)
+                                reference=s["target"],YAeHMOP=b,**extra)
         return result
 
 def base_fit(f,budget,seed):
