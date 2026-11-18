@@ -1,0 +1,19 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  Ga1      s            0  0
+     2  Ga1      px           1  1
+     3  Ga1      py           1 -1
+     4  Ga1      pz           1  0
+     5  Ga1      dx2-y2       2  2
+     6  Ga1      dz2          2  0
+     7  Ga1      dxy          2 -2
+     8  Ga1      dxz          2  1
+     9  Ga1      dyz          2 -1
+    10  N2       s            0  0
+    11  N2       px           1  1
+    12  N2       py           1 -1
+    13  N2       pz           1  0
+    14  N2       dx2-y2       2  2
+    15  N2       dz2          2  0
+    16  N2       dxy          2 -2
+    17  N2       dxz          2  1
+    18  N2       dyz          2 -1

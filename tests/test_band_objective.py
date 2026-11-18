@@ -37,6 +37,22 @@ class WindowObjectiveTests(unittest.TestCase):
         self.assertGreater(b,a)
         with self.assertRaises(ValueError):WindowSettings.from_dict({"w_nonsense":1})
 
+class BandWeightAndDispersionTests(unittest.TestCase):
+    def test_band_weights_parse_and_term(self):
+        from band_objective import parse_band_weights
+        self.assertEqual(parse_band_weights("v1:10 c2:5"),{("v",1):10.0,("c",2):5.0})
+        with self.assertRaises(ValueError):parse_band_weights("x1:3")
+        x,A=bands();B=A.copy();B[:,2]+=0.2                      # only v1 wrong
+        s=WindowSettings(band_weights="v1:10 c1:10",w_bands=5)
+        m=window_error(A,3,B,3,x,[0,1],s)
+        self.assertGreater(m["term_bands"],0);self.assertAlmostEqual(m["rms_c1_eV"],0.2,places=10)  # VBM-aligned: v1 shift moves c1
+    def test_slope_ignores_rigid_shift_of_one_band(self):
+        x,A=bands();B=A.copy();B[:,4]+=0.3                      # c2 shifted rigidly: same dispersion
+        m=window_error(A,3,B,3,x,[0,1],WindowSettings(w_slope=1))
+        self.assertAlmostEqual(m["rms_slope_eV"],0.0,places=12)
+        B[:,4]+=0.2*np.sin(2*np.pi*x)                           # now the shape changes
+        self.assertGreater(window_error(A,3,B,3,x,[0,1],WindowSettings(w_slope=1))["rms_slope_eV"],0)
+
 class BasisTests(unittest.TestCase):
     P={"S":{"atnum":16,"nval":6,"s":{"nzeta":1,"n":3,"Hii":-20,"zeta1":2.1,"zeta2":0,"c1":1,"c2":0},
                                     "p":{"nzeta":1,"n":3,"Hii":-11,"zeta1":1.8,"zeta2":0,"c1":1,"c2":0}},

@@ -35,9 +35,9 @@ import numpy as np
 
 HARTREE = 27.211386245988
 BOHR = 0.529177210903
-DFT_CODES = ("vasp", "qe", "siesta", "aims")
+DFT_CODES = ("vasp", "qe", "siesta", "aims", "wannier90")
 _CODE_ALIASES = {"quantum-espresso": "qe", "espresso": "qe", "pw": "qe",
-                 "fhi-aims": "aims", "fhiaims": "aims"}
+                 "fhi-aims": "aims", "fhiaims": "aims", "w90": "wannier90", "wannier": "wannier90"}
 
 
 @dataclass
@@ -53,6 +53,7 @@ class DFTBands:
     files: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
     nocc_source: str = ""
+    spin_channel: str | None = None
 
 
 def normalize_code(code):
@@ -103,14 +104,28 @@ def gap_after(E, nocc):
     return float(E[:, nocc].min() - E[:, nocc - 1].max())
 
 
-def nocc_from_fermi(E, fermi, tol=0.05):
-    """Bands entirely below the Fermi level (+tol); refuses metals."""
+def nocc_from_fermi(E, fermi, tol=0.05, reach=0.3):
+    """Bands entirely below the Fermi level (+tol); refuses metals.
+
+    A Fermi level taken from a different k set (e.g. the SCF mesh) can sit slightly below
+    the band maximum on the path; then the gap closest to it, within `reach` eV, is used.
+    """
     occ = int(np.sum(E.max(axis=0) <= fermi + tol))
     crossing = [j for j in range(E.shape[1]) if E[:, j].min() < fermi - tol < fermi + tol < E[:, j].max()]
-    if crossing or gap_after(E, occ) <= 0:
-        raise ValueError(f"Bands cross the Fermi level ({fermi:.3f} eV): metallic reference; "
-                         "set valence_bands in [reference] if this is wrong")
-    return occ
+    if not crossing and gap_after(E, occ) > 0:
+        return occ
+    best = None
+    for n in range(1, E.shape[1]):
+        if gap_after(E, n) <= 0.02:
+            continue
+        lo, hi = E[:, n - 1].max(), E[:, n].min()
+        dist = 0.0 if lo <= fermi <= hi else min(abs(fermi - lo), abs(fermi - hi))
+        if best is None or dist < best[0]:
+            best = (dist, n)
+    if best is not None and best[0] <= reach:
+        return best[1]
+    raise ValueError(f"Bands cross the Fermi level ({fermi:.3f} eV): metallic reference; "
+                     "set valence_bands in [reference] if this is wrong")
 
 
 def nocc_from_electrons(nelect, spinor=False):
@@ -205,6 +220,9 @@ def _read_eigenval(path):
     lines = Path(path).read_text(errors="replace").splitlines()
     ispin = int(lines[0].split()[-1])
     nelect, nk, nb = (int(round(float(x))) for x in lines[5].split()[:3])
+    if len(lines) < 6 + nk * (nb + 2):
+        raise ValueError(f"{path}: incomplete EIGENVAL ({len(lines)} lines for {nk} k points x {nb} bands); "
+                         "the VASP run did not finish")
     kfrac, weights = [], []
     spins = [np.zeros((nk, nb)) for _ in range(ispin)]
     i = 6
@@ -265,7 +283,7 @@ def read_vasp(folder, dft_file=None, soc=False):
         keep = weights == 0
         kfrac, E = kfrac[keep], E[keep]
         notes.append(f"dropped {int((~keep).sum())} weighted SCF k points (zero-weight band path kept)")
-    nocc = nocc_from_electrons(nelect, spinor=want_soc)
+    nocc = 0 if _SPIN_CHANNEL else nocc_from_electrons(nelect, spinor=want_soc)   # spin channels: from E_F
     labels, nper, kpfile = _vasp_kpoints_labels(folder)
     if kpfile is not None:
         files["kpoints"] = str(kpfile)
@@ -276,7 +294,15 @@ def read_vasp(folder, dft_file=None, soc=False):
                     nocc_source=f"NELECT={nelect:g}")
 
 
+_SPIN_CHANNEL = None   # set by read_dft_bands(spin_channel=...) for collinear spin-polarized runs
+
+
 def _merge_spins(spins, notes):
+    if _SPIN_CHANNEL is not None:
+        if len(spins) != 2:
+            raise ValueError("spin_channel requested but the calculation is not spin-polarized")
+        notes.append(f"spin channel {'up' if _SPIN_CHANNEL == 1 else 'down'} of a spin-polarized run")
+        return spins[_SPIN_CHANNEL - 1]
     if len(spins) == 1:
         return spins[0]
     if np.max(np.abs(spins[0] - spins[1])) < 1e-3:
@@ -520,7 +546,8 @@ def read_qe(folder, dft_file=None, soc=False):
     labels, inp = _qe_input_labels(folder, np.asarray(atoms.cell))
     if inp is not None:
         files["labels"] = str(inp)
-    return DFTBands("qe", atoms, kfrac, E, nocc_from_electrons(nelec, spinor=soc), fermi, None, labels, files, notes,
+    return DFTBands("qe", atoms, kfrac, E, 0 if _SPIN_CHANNEL else nocc_from_electrons(nelec, spinor=soc),
+                    fermi, None, labels, files, notes,
                     nocc_source=f"nelec={nelec:g}")
 
 
@@ -626,7 +653,7 @@ def read_siesta(folder, dft_file=None, soc=False):
                          f"with the cell of {Path(files['structure']).name}")
     labels = [(nodes[i], names[i]) for i in range(len(nodes)) if names[i]]
     E = _merge_spins(spins, notes)
-    return DFTBands("siesta", atoms, kfrac, E, nocc_from_fermi(E, fermi), fermi, segments, labels,
+    return DFTBands("siesta", atoms, kfrac, E, 0 if _SPIN_CHANNEL else nocc_from_fermi(E, fermi), fermi, segments, labels,
                     files, notes, nocc_source=f"Fermi level {fermi:.4f} eV")
 
 
@@ -689,6 +716,8 @@ def read_aims(folder, dft_file=None, soc=False):
     kfrac = np.vstack(ks); occ = np.vstack(occs); E = np.vstack(es)
     full = 1.0 if (spin_on or want_soc) else 2.0
     nk_occ = np.sum(occ > 0.5 * full, axis=1)
+    if _SPIN_CHANNEL:
+        nk_occ = np.zeros(1, int)                    # spin channels: occupied bands from E_F
     if nk_occ.min() != nk_occ.max():
         raise ValueError("Occupations change along the path: metallic FHI-aims reference")
     nocc = int(nk_occ[0])
@@ -716,19 +745,167 @@ def read_aims(folder, dft_file=None, soc=False):
                     nocc_source="occupations in band files")
 
 
-READERS = {"vasp": read_vasp, "qe": read_qe, "siesta": read_siesta, "aims": read_aims}
+# --------------------------------------------------------------------------
+# Wannier90 (interpolated tight-binding bands)
+# --------------------------------------------------------------------------
+def _w90_block(text, name):
+    m = re.search(rf"^\s*begin\s+{name}\s*$(.*?)^\s*end\s+{name}\s*$", text, re.M | re.S | re.I)
+    if not m:
+        return None
+    return [l.split("!")[0].split("#")[0].strip() for l in m.group(1).splitlines()
+            if l.split("!")[0].split("#")[0].strip()]
 
 
-def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False):
+def _w90_keyword(text, key):
+    m = re.search(rf"^\s*{key}\s*[=:]?\s*([^\s!#]+)", text, re.M | re.I)
+    return m.group(1) if m else None
+
+
+def _fermi_nearby(folder):
+    """Fermi level of the DFT run next to the wannierization (VASP OUTCAR, QE outputs)."""
+    p = folder / "OUTCAR"
+    if p.is_file():
+        m = re.findall(r"E-fermi\s*:\s*([-\d.]+)", p.read_text(errors="replace"))
+        if m:
+            return float(m[-1]), str(p)
+    for q in sorted(folder.iterdir()):
+        if q.is_file() and q.stat().st_size < 50e6 and q.suffix.lower() in (".out", ".pwo", ".log"):
+            txt = q.read_text(errors="replace")
+            m = re.findall(r"the Fermi energy is\s+([-\d.]+)", txt) or \
+                re.findall(r"highest occupied, lowest unoccupied level \(ev\):\s+([-\d.]+)", txt) or \
+                re.findall(r"highest occupied level \(ev\):\s+([-\d.]+)", txt)
+            if m:
+                return float(m[-1]), str(q)
+    return None, None
+
+
+def read_wannier90(folder, dft_file=None, soc=False):
+    """Bands interpolated by Wannier90 (seedname_band.dat/.kpt) as the reference.
+
+    Cell from seedname.nnkp (real_lattice) or seedname.win (unit_cell_cart), atoms from
+    the .win, labels from seedname_band.labelinfo.dat; the Fermi level from fermi_energy
+    in the .win, else from the DFT run in the same folder (OUTCAR, pw.x output); the
+    occupied Wannier bands are those below it.
+    """
+    from ase import Atoms
+    folder = Path(folder)
+    notes, files = [], {}
+    wins = [p for p in folder.glob("*.win")]
+    win = _pick(wins, "Wannier90 .win files", folder, dft_file if dft_file and str(dft_file).endswith(".win") else None)
+    if win is None:
+        raise FileNotFoundError(f"{folder}: no Wannier90 .win file")
+    seed = win.stem
+    text = win.read_text(errors="replace")
+    files["win"] = str(win)
+    spinors = (_w90_keyword(text, "spinors") or "f").lower().lstrip(".").startswith("t")
+    if spinors and not soc:
+        raise ValueError("Wannier90 run with spinors = true (spin-orbit): not supported by spinless EHT")
+    if soc and not spinors:
+        raise ValueError("Not a spinor (spin-orbit) Wannier90 run")
+    # cell
+    nnkp = folder / f"{seed}.nnkp"
+    cell = None
+    if nnkp.is_file():
+        rl = _w90_block(nnkp.read_text(errors="replace"), "real_lattice")
+        if rl:
+            cell = np.array([[float(x) for x in r.split()[:3]] for r in rl[:3]]); files["nnkp"] = str(nnkp)
+    if cell is None:
+        uc = _w90_block(text, "unit_cell_cart")
+        if not uc:
+            raise ValueError(f"{win}: no unit_cell_cart (and no .nnkp)")
+        scale = 1.0
+        if uc[0].lower() in ("bohr", "ang"):
+            scale = BOHR if uc[0].lower() == "bohr" else 1.0; uc = uc[1:]
+        cell = np.array([[float(x) for x in r.split()[:3]] for r in uc[:3]]) * scale
+    # atoms
+    syms, pos, frac = [], [], None
+    blk = _w90_block(text, "atoms_frac")
+    if blk:
+        frac = True
+    else:
+        blk = _w90_block(text, "atoms_cart"); frac = False
+    if not blk:
+        raise ValueError(f"{win}: no atoms_frac / atoms_cart block")
+    scale = 1.0
+    if not frac and blk[0].lower() in ("bohr", "ang"):
+        scale = BOHR if blk[0].lower() == "bohr" else 1.0; blk = blk[1:]
+    for r in blk:
+        f = r.split(); syms.append(re.sub(r"[^A-Za-z]", "", f[0]).capitalize()); pos.append([float(x) for x in f[1:4]])
+    pos = np.array(pos)
+    atoms = Atoms(symbols=syms, scaled_positions=pos, cell=cell, pbc=True) if frac else \
+        Atoms(symbols=syms, positions=pos * scale, cell=cell, pbc=True)
+    files["structure"] = str(win)
+    # bands
+    kpt = folder / f"{seed}_band.kpt"; dat = folder / f"{seed}_band.dat"
+    if not (kpt.is_file() and dat.is_file()):
+        raise FileNotFoundError(f"{folder}: {seed}_band.kpt / {seed}_band.dat not found (bands_plot = true)")
+    kl = kpt.read_text().split("\n")
+    nk = int(kl[0].split()[0])
+    kfrac = np.array([[float(x) for x in l.split()[:3]] for l in kl[1:1 + nk]])
+    vals = _floats(dat.read_text())
+    nw = len(vals) // (2 * nk)
+    if nw * 2 * nk != len(vals):
+        raise ValueError(f"{dat}: {len(vals)} numbers is not a whole number of bands of {nk} k points")
+    E = np.array(vals).reshape(nw, nk, 2)[:, :, 1].T
+    files["eigenvalues"] = str(dat)
+    labels = []
+    li = folder / f"{seed}_band.labelinfo.dat"
+    if li.is_file():
+        for l in li.read_text().splitlines():
+            f = l.split()
+            if len(f) >= 6:
+                labels.append((np.array([float(x) for x in f[3:6]]), pretty_label(f[0])))
+        files["labels"] = str(li)
+    fermi = _w90_keyword(text, "fermi_energy")
+    if fermi is not None:
+        fermi = float(fermi.replace("d", "e").replace("D", "e")); src = "fermi_energy in the .win"
+    else:
+        fermi, src = _fermi_nearby(folder)
+    if fermi is None:
+        raise ValueError(f"{folder}: no Fermi level (fermi_energy in the .win, OUTCAR or pw.x output); "
+                         "give valence_bands instead")
+    notes.append(f"Fermi level {fermi:.4f} eV from {src}")
+    return DFTBands("wannier90", atoms, kfrac, E, nocc_from_fermi(E, fermi), fermi, None, labels, files, notes,
+                    nocc_source=f"Fermi level ({src})")
+
+
+READERS = {"vasp": read_vasp, "qe": read_qe, "siesta": read_siesta, "aims": read_aims, "wannier90": read_wannier90}
+
+
+def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, spin_channel=None):
     """Read a DFT band-structure folder; checks for a positive gap.
 
     soc=True reads a spin-orbit (noncollinear) calculation instead: every band is a
     spinor holding one electron, so nocc counts electrons, not pairs.
+    spin_channel='up'/'down' (or 1/2) reads one channel of a collinear spin-polarized
+    run; its occupied bands are those below the common Fermi level.
     """
+    global _SPIN_CHANNEL
     folder = Path(folder).expanduser().resolve()
     if not folder.is_dir():
         raise FileNotFoundError(f"DFT folder not found: {folder}")
-    ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
+    ch = {None: None, "up": 1, "down": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(
+        spin_channel if not isinstance(spin_channel, str) else spin_channel.lower())
+    if spin_channel is not None and ch is None:
+        raise ValueError("spin_channel must be up or down")
+    _SPIN_CHANNEL = ch
+    try:
+        ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
+    finally:
+        _SPIN_CHANNEL = None
+    if ch is not None:
+        if ref.fermi is None:
+            raise ValueError("a spin channel needs the Fermi level of the run (not found)")
+        if valence_bands is None:
+            ref.nocc = nocc_from_fermi(np.sort(np.asarray(ref.energies, float), axis=1), ref.fermi)
+            ref.nocc_source = f"Fermi level {ref.fermi:.4f} eV (spin channel {'up' if ch == 1 else 'down'})"
+        ref.spin_channel = "up" if ch == 1 else "down"
+    # Energies in ascending order at every k: bands.x (QE) and other band tools reorder the
+    # bands to follow them through crossings, which breaks the band count from the gap.
+    E = np.asarray(ref.energies, float)
+    if np.any(np.diff(E, axis=1) < -1e-9):
+        ref.notes.append("eigenvalues sorted in energy at every k (file had bands reordered across crossings)")
+        ref.energies = np.sort(E, axis=1)
     if valence_bands is not None:
         ref.nocc = int(valence_bands); ref.nocc_source = "user (valence_bands)"
     if ref.energies.ndim != 2 or len(ref.kfrac) != len(ref.energies) or len(ref.kfrac) < 2:

@@ -22,7 +22,7 @@ def model(k):
     """Smooth gapped 8-band model on fractional k (eV)."""
     c=np.cos(2*np.pi*np.asarray(k)).sum(axis=-1)
     base=np.array([-12,-9,-8,-7,2,3,5,8],float)
-    return base+np.outer(c,[.5,.4,.3,.2,-.3,-.4,.5,.6]).reshape(-1,NB)
+    return np.sort(base+np.outer(c,[.5,.4,.3,.2,-.3,-.4,.5,.6]).reshape(-1,NB),axis=1)   # sorted, as the reader returns
 
 def line_kpoints(n):
     """VASP line mode: n points per segment, nodes repeated."""
@@ -120,6 +120,27 @@ def write_aims(d,n=10):
     (d/"aims.out").write_text("Invoking FHI-aims ...\n  | Chemical potential (Fermi level):    0.5 eV\n")
     return np.vstack(allk),np.vstack(allE)
 
+def write_w90(d,n=10,fermi_in_win=True):
+    """Wannier90 seedname.win + seedname_band.kpt/.dat/.labelinfo.dat (bands_plot output)."""
+    d.mkdir(parents=True,exist_ok=True)
+    cell=np.asarray(DIAMOND.cell);frac=DIAMOND.get_scaled_positions()
+    k=[];lab=[]
+    for i,((la,a),(lb,b)) in enumerate(zip(NODES[:-1],NODES[1:])):
+        a,b=np.array(a,float),np.array(b,float)
+        pts=[a+(b-a)*j/n for j in range(n+(1 if i==len(NODES)-2 else 0))]
+        lab.append((len(k)+1,la,a));k+=pts
+    lab.append((len(k),NODES[-1][0],np.array(NODES[-1][1],float)))
+    k=np.array(k);E=model(k)
+    uc="\n".join(" ".join(f"{v:.10f}" for v in r) for r in cell)
+    at="\n".join(f"C {f[0]:.10f} {f[1]:.10f} {f[2]:.10f}" for f in frac)
+    win=f"num_wann = {NB}\nbands_plot = true\n"+(f"fermi_energy = {(E[:,NOCC-1].max()+E[:,NOCC].min())/2:.6f}\n" if fermi_in_win else "")
+    (d/"w.win").write_text(win+f"begin unit_cell_cart\nang\n{uc}\nend unit_cell_cart\nbegin atoms_frac\n{at}\nend atoms_frac\n")
+    (d/"w_band.kpt").write_text(f"{len(k)}\n"+"".join(f"{a:.8f} {b:.8f} {c:.8f} 1.0\n" for a,b,c in k))
+    x=np.r_[0,np.cumsum(np.linalg.norm(np.diff(k@(2*np.pi*np.linalg.inv(cell).T),axis=0),axis=1))]
+    (d/"w_band.dat").write_text("".join("".join(f"{xx:.8E} {e:.8E}\n" for xx,e in zip(x,E[:,j]))+"\n" for j in range(NB)))
+    (d/"w_band.labelinfo.dat").write_text("".join(f"{'G' if l=='Γ' else l} {i} 0.0 {kk[0]} {kk[1]} {kk[2]}\n" for i,l,kk in lab))
+    return k,E
+
 class ReaderTests(unittest.TestCase):
     def check(self,code,writer,**kw):
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,6 +177,13 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(er.real_lines,[True,False,True,True])
         self.assertEqual(int((~er.mask).sum()),6)   # interior of the X->W connecting line
     def test_aims(self):self.check("aims",write_aims)
+    def test_wannier90(self):self.check("wannier90",write_w90)
+    def test_wannier90_needs_fermi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d=Path(tmp)/"w";write_w90(d,fermi_in_win=False)
+            with self.assertRaisesRegex(ValueError,"Fermi"):read_dft_bands(d,"wannier90")
+            (d/"OUTCAR").write_text(f" E-fermi :   {(model(np.zeros((1,3)))[0,NOCC-1]):.4f}     XC(G=0)\n")
+            self.assertEqual(read_dft_bands(d,"wannier90").nocc,NOCC)
 
     def test_refusals(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,10 @@
+# Only the two best protocols (and spin-orbit fits) go to the repository;
+# the other protocol folders stay local.
+*
+!.gitignore
+!window-ga/
+!window-ga/**
+!frontier-de/
+!frontier-de/**
+!soc-from-window-ga/
+!soc-from-window-ga/**

@@ -9,7 +9,7 @@ the extended Hückel parameters to those numbers. No digitization is involved.
 python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir path/to/bands --dft-code vasp --outdir outputs/MoS2
 ```
 
-* `--dft-code`: `vasp`, `qe`, `siesta` or `aims` (also `[reference] dft_code`).
+* `--dft-code`: `vasp`, `qe`, `siesta`, `aims` or `wannier90` (also `[reference] dft_code`).
 * `--dft-dir` (also `[reference] dft_dir`, relative to the INI file).
 * The structure positional argument is **optional**: the structure of the DFT
   calculation is used (written to `OUTDIR/dft_reference/POSCAR`). If you give one,
@@ -28,6 +28,7 @@ python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir path/to/bands --dft-cod
 | QE | `<prefix>.save/data-file-schema.xml` (or `<prefix>.xml`) of the `bands` run; else the pw.x output of that run; else the `bands.x` file (`&plot nbnd=...`) | XML / pw.x output | `nelec` | pw.x input with `K_POINTS crystal_b`/`tpiba_b` and `! label` |
 | SIESTA | `<SystemLabel>.bands` + the `.fdf` with `%block BandLines` | `.STRUCT_OUT`, `.XV` or `.fdf` | Fermi level of `.bands` | `BandLines` |
 | FHI-aims | `band1001.out`, … + `control.in` (`output band`) | `geometry.in` | occupations in the band files | `output band` |
+| Wannier90 | `seedname_band.dat` + `seedname_band.kpt` (interpolated TB bands, `bands_plot = true`) | `seedname.nnkp` (`real_lattice`) or `.win` (`unit_cell_cart`) + atoms of the `.win` | bands below the Fermi level: `fermi_energy` in the `.win`, else the OUTCAR / pw.x output in the folder | `seedname_band.labelinfo.dat` |
 
 When the files carry no labels, the high-symmetry points are named from the
 Bravais lattice (ASE), including symmetry-equivalent positions; otherwise
@@ -112,6 +113,11 @@ high-symmetry points and the local maxima/minima of every band (energy and posit
 Weights go in an `[objective]` INI section (`w_extrema = 6`, `energy_scale = 1.5`, ...);
 `--objective frontier` keeps the earlier n_pairs objective.
 
+Targeted refinement: `band_weights = v1:10 v2:6 c1:10 ...` with `w_bands` (named bands counted
+from the gap), `w_slope` (dispersion: ΔE between consecutive k points) and `w_mass` (curvature
+at the band edges) in `[objective]`; `--start-from FITTINGDIR` starts from an earlier fit (also of
+another material) with the bounds centred there. Examples: `validation/refine/*.ini`.
+
 `--basis-add "S:d H:p"` or `auto` adds shells YAeHMOP accepts but the stock table lacks
 (p on H, d on s/p elements, the 3d of Zn); they start from estimates and are fitted.
 
@@ -134,6 +140,18 @@ format), figures, `fit_summary.json`.
 python USER_WORKFLOW/soc_fit.py --dft-dir path/to/bands-soc --dft-code vasp \
     --from-fitting outputs/material/fitting --outdir outputs/material_soc
 ```
+
+## Spin-polarized references (`--spin-channel`, `USER_WORKFLOW/spin_combine.py`)
+
+A collinear spin-polarized run is fitted channel by channel (`--spin-channel up`, then `down`;
+occupied bands below the common Fermi level, each channel needs a gap). `spin_combine.py
+--up FIT_UP --down FIT_DOWN --outdir OUT` joins both in one spinor basis (n spin-up orbitals,
+then the same n spin-down), with zero up-down blocks and each channel shifted by
+(DFT midgap of the channel − E_F) so that the exchange splitting of the DFT is kept. Output:
+`huckel-SP.dat` + `basis_set-SP` (WanTiBEXOS `SP` format).
+
+The tool exports the Hamiltonian to WanTiBEXOS in all three cases: `huckel-NP.dat`
+(spinless), `huckel-SOC.dat` (spin–orbit) and `huckel-SP.dat` (spin-polarized).
 
 ## Validation examples
 

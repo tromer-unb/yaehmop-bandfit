@@ -97,7 +97,8 @@
 
 YAeHMOP BandFit adjusts the atomic parameters of the \textbf{extended H\"uckel theory} (EHT) so that the
 band structure computed by the original YAeHMOP solver reproduces a reference band structure, usually from
-DFT. You give a crystal structure (CIF, or a VASP, Quantum ESPRESSO, SIESTA or FHI-aims file), the reference bands (an image or a numerical CSV) and a small INI
+DFT. It exports the fitted tight-binding Hamiltonian and overlap directly to WanTiBEXOS (section~\ref{sec:outputs}).
+You give a crystal structure (CIF, or a VASP, Quantum ESPRESSO, SIESTA or FHI-aims file), the reference bands (an image or a numerical CSV) and a small INI
 settings file. The program returns:
 
 \begin{itemize}[nosep]
@@ -315,6 +316,7 @@ VASP & \cmd{vasprun.xml} or \cmd{EIGENVAL} (+ \cmd{POSCAR}) & \cmd{NELECT}; line
 QE & XML of the \cmd{bands} run, pw.x output, or \cmd{bands.x} file & \cmd{nelec}; \cmd{crystal\_b} with \cmd{! label} \\
 SIESTA & \cmd{.bands} + \cmd{.fdf} with \cmd{BandLines} & Fermi level; \cmd{BandLines} \\
 FHI-aims & \cmd{band1001.out}\ldots{} + \cmd{control.in} & occupations; \cmd{output band} \\
+Wannier90 & \cmd{seedname\_band.dat/.kpt} + \cmd{.nnkp} or \cmd{.win} & Fermi level (\cmd{.win}, OUTCAR, pw.x); \cmd{\_band.labelinfo.dat} \\
 \bottomrule
 \end{tabularx}
 \end{center}
@@ -709,6 +711,21 @@ extrema & $g$-weighted errors at the local maxima/minima of every band, and thei
 All weights, the window, $E_s$ and $w_{\rm far}$ are set in an \cmd{[objective]} section of the INI file (names as in
 \cmd{WindowSettings}, e.g.\ \cmd{w\_extrema = 6}); \cmd{--objective frontier} restores the earlier objective.
 
+\subsection{Named bands, dispersion and warm starts}\label{sec:refine}
+Three options sharpen a fit on the bands that matter:
+\begin{itemize}[nosep]
+  \item \textbf{Named bands} (\cmd{band\_weights}, \cmd{w\_bands} in \cmd{[objective]}): weights of bands counted from
+  the gap, e.g.\ \cmd{band\_weights = v1:10 v2:6 v3:3 c1:10 c2:6 c3:3} (v1 = top of the valence, c1 = bottom of the
+  conduction); their weighted RMS enters with \cmd{w\_bands}. Unlike $g(E)$, this targets specific bands wherever they go.
+  \item \textbf{Dispersion} (\cmd{w\_slope}, \cmd{w\_mass}): RMS of the differences between consecutive k points
+  ($\Delta E$ along the path, $g$- and band-weighted), which rewards the right band shape even with a small offset, and
+  the log of the curvature ratio (effective mass) at the VBM and the CBM.
+  \item \textbf{Warm start} (\cmd{--start-from FITTINGDIR}, or \cmd{start\_from} in \cmd{[fit]}): the fit starts from
+  the parameters (and basis) of an earlier fit, with the search bounds and the regularization centred there; it can be
+  another material (e.g.\ Si wurtzite from Si diamond).
+\end{itemize}
+\cmd{validation/refine/*.ini} and \cmd{run\_refine.sh} hold the targeted refinements of section~\ref{sec:refine-results}.
+
 \subsection{Larger EHT basis (\cmd{--basis-add})}
 YAeHMOP accepts one shell per angular momentum and atom ($s,p,d,f$), so the minimal basis of the stock table can be
 extended with the missing shells: \cmd{--basis-add "S:d H:p"} or \cmd{auto} ($p$ where missing, e.g.\ H; $d$ on every
@@ -716,30 +733,38 @@ element with $p$ but no $d$, e.g.\ Si, C, S, I; the filled $3d$ of Zn, which the
 12 electrons). Added shells start from estimates (a $d$ shell 4~eV above the $p$ level with $\zeta=0.8\,\zeta_p$; Zn $3d$
 double-zeta) and are fitted with the rest; they add empty states and do not change the electron count.
 
-\subsection{Comparison on the validation examples}
-\cmd{validation/compare\_strategies.py} refits every example with several protocols and scores all of them with the
-same measures; outputs go to \cmd{validation/<code>/<example>/fitting/<protocol>/}. With 2000 YAeHMOP calls per fit,
-RMS of the states within 2~eV of $E_F$ (eV):
+\subsection{Best validation of each material}
+\cmd{validation/compare\_strategies.py} refits every example with several protocols (\cmd{frontier-de}, \cmd{window-de},
+\cmd{window-ga}, \cmd{window-cmaes}, \cmd{window-ga-basis}; 2000 YAeHMOP calls) and the targeted refinements of
+\cmd{validation/refine*/} start from the best of them. All are scored with the same measure: RMS of the EHT$-$DFT
+differences of the states within 2~eV of $E_F$ (middle of the gap), both band structures aligned at their VBM. The
+repository keeps the two best \cmd{fitting/<protocol>/} folders of each example; the best one is listed here.
 \begin{center}\small
-\begin{tabular}{l r r l}
+\begin{tabular}{l l l r r}
 \toprule
-System & frontier (earlier) & best & best protocol \\
+Material & Reference & Best protocol & RMS $\le$2~eV (eV) & gap error (eV) \\
 \midrule
-MoS$_2$, FHI-aims HSE06 & 0.147 & 0.118 & window, genetic + NM \\
-MoS$_2$, FHI-aims PBE & 1.706 & 0.183 & window, CMA-ES + NM \\
-3C-SiC, QE PBE & 1.125 & 0.266 & window, genetic + NM, extended basis \\
-Si diamond, QE LDA & 0.551 & 0.220 & window, genetic + NM, extended basis \\
-Si wurtzite, QE LDA & 1.390 & 0.718 & window, genetic + NM, extended basis \\
-Al$_2$O$_2$, SIESTA & 0.410 & 0.092 & window, CMA-ES + NM \\
-C$_{52}$H$_{16}$ nanoribbon, SIESTA & 0.434 & 0.119 & window, genetic + NM, extended basis \\
-In$_2$S$_2$, VASP PBE & 0.370 & 0.154 & window, CMA-ES + NM \\
-TiBr$_2$, VASP PBE & 1.060 & 0.208 & window, genetic + NM \\
-ZnI$_2$, VASP PBE & --- & 0.222 & window, genetic + NM, extended basis \\
+MoS$_2$ & FHI-aims HSE06 & window, genetic + NM & 0.118 & $+0.054$ \\
+MoS$_2$ & FHI-aims PBE & targeted refinement & 0.180 & $-0.056$ \\
+3C-SiC & QE PBE & window, genetic + NM, extended basis & 0.266 & $+0.190$ \\
+Si diamond & QE LDA & window, genetic + NM, extended basis & 0.220 & $+0.021$ \\
+Si wurtzite & QE LDA & window, genetic + NM, extended basis & 0.225 & $+0.002$ \\
+Al$_2$O$_2$ bilayer & SIESTA & window, CMA-ES + NM & 0.092 & $+0.028$ \\
+C$_{52}$H$_{16}$ nanoribbon & SIESTA PBE & window, genetic + NM, extended basis & 0.119 & $+0.035$ \\
+In$_2$S$_2$ & VASP PBE & targeted refinement (VB1--3, CB1--2) & 0.193 & $+0.106$ \\
+TiBr$_2$ & VASP PBE & window, genetic + NM & 0.208 & $-0.059$ \\
+ZnI$_2$ & VASP PBE & targeted refinement & 0.094 & $+0.057$ \\
+GaN & Wannier90 (QE PBE) & targeted refinement & 0.245 & $+0.005$ \\
+Si diamond & Wannier90 (VASP PBE) & targeted refinement & 0.192 & $+0.013$ \\
+TiBr$_2$ & Wannier90 (VASP PBE) & window, CMA-ES + NM & 0.170 & $+0.038$ \\
 \bottomrule
 \end{tabular}\end{center}
-The window objective wins everywhere; the extended basis is needed for Si, SiC, the nanoribbon and ZnI$_2$ (which cannot
-be fitted at all without the Zn $3d$); genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as best optimizer, so
-trying both is worthwhile.
+Lessons: the window objective beats the frontier one everywhere; the extended basis is needed for Si, SiC, GaN, the
+nanoribbon and ZnI$_2$ (the stock table has no Zn $3d$); genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as best
+optimizer; named-band weights with a warm start fix the bands nearest $E_F$ (ZnI$_2$: VB1--3 within 0.06~eV). Conduction bands
+that are delocalized in the vacuum (In$_2$S$_2$ CB3 and above: $\approx$27\% of the charge in the atomic spheres of the PROCAR)
+cannot be represented by the minimal EHT basis and are better left out of the fit. QE \cmd{bands.x} files reorder the bands
+through crossings; the reader sorts the eigenvalues at every k.
 
 % ================================================================ 6c
 \section{Spin--orbit coupling}\label{sec:soc}
@@ -798,6 +823,34 @@ In$_2$S$_2$, VASP PBE & In $p$ 0.092, S $p$ 0.24 & 0.154 $\to$ 0.160 & $+0.198\t
 The I $5p$ value is close to the atomic one; \cmd{wtb.x} reproduces the EHT+SOC bands of \cmd{huckel-SOC.dat} for MoS$_2$
 to $3\times10^{-5}$~eV near the gap, with the same splitting at K. Limitations: the $\lambda$'s compensate part of the error
 of the spinless EHT (e.g.\ S $3p$ in the FHI-aims case); a joint fit of EHT parameters and $\lambda$'s is a possible next step.
+
+% ================================================================ 6d
+\section{Spin-polarized (collinear) references}\label{sec:spin}
+A collinear spin-polarized run is fitted channel by channel, giving one EHT parameter set per spin:
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir bands --dft-code vasp --spin-channel up   --outdir out/up
+python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir bands --dft-code vasp --spin-channel down --outdir out/down
+python USER_WORKFLOW/spin_combine.py --up out/up/fitting --down out/down/fitting --outdir out/spin
+\end{lstlisting}
+\cmd{--spin-channel} (or \cmd{spin\_channel} in \cmd{[reference]}) reads one channel (VASP \cmd{ISPIN=2}, QE \cmd{lsda},
+SIESTA \cmd{nspin=2}, FHI-aims \cmd{spin collinear}); its occupied bands are those below the common Fermi level, so each
+channel must have its own gap. \cmd{spin\_combine.py} joins the two fits in one spinor basis of $2n$ functions,
+\textbf{first the $n$ orbitals with spin up, then the same $n$ orbitals with spin down}, with the same logic as the
+spin--orbit case but no coupling:
+\[
+H=\begin{pmatrix}H_\uparrow+\delta_\uparrow S_\uparrow & 0\\ 0 & H_\downarrow+\delta_\downarrow S_\downarrow\end{pmatrix},\qquad
+S=\begin{pmatrix}S_\uparrow & 0\\ 0 & S_\downarrow\end{pmatrix},
+\]
+where the up--down blocks are written as zero and $\delta_\sigma=(E^{\rm DFT}_{{\rm mid},\sigma}-E^{\rm DFT}_F)$ restores the
+relative position of the two channels (exchange splitting), since each channel fit is aligned at its own midgap. Output:
+\cmd{huckel-SP.dat} (WanTiBEXOS \cmd{SP} format, Fermi level 0), \cmd{basis\_set-SP} (spin column 1 then $-1$), the two
+parameter tables and \cmd{fit\_summary.json}. Checked with synthetic data (the eigenvalues of the joined $H$ are the union of
+the two shifted channels); the two spin-polarized band runs found locally were incomplete, so no real example is in
+\cmd{validation/} yet.
+
+\paragraph{Export to WanTiBEXOS.} The tool already writes the Hamiltonian for WanTiBEXOS: \cmd{huckel-NP.dat} (spinless),
+\cmd{huckel-SOC.dat} (spin--orbit) and \cmd{huckel-SP.dat} (spin-polarized), each with its \cmd{basis\_set-*} file, read with
+\cmd{DFT= S}; the spinless and SOC files were checked with \cmd{wtb.x} (same bands as YAeHMOP to $10^{-4}$~eV).
 
 % ================================================================ 7
 \section{Frozen transfer}

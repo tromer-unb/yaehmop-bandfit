@@ -537,8 +537,9 @@ def dft_main(args,parser,config,inputs,dft_dir):
     if pairs not in (1,2,3,4):parser.error("n_pairs must be 1,2,3,4")
     outdir=args.outdir.resolve();outdir.mkdir(parents=True,exist_ok=True)
     refdir=outdir/"dft_reference";refdir.mkdir(exist_ok=True)
+    spin_ch=args.spin_channel or ref_cfg.get("spin_channel",fallback=None)
     try:
-        ref=read_dft_bands(dft_dir,code,dft_file,vb)
+        ref=read_dft_bands(dft_dir,code,dft_file,vb,spin_channel=spin_ch)
     except (ValueError,FileNotFoundError) as exc:
         parser.error(f"DFT folder {dft_dir}: {exc}")
     # Structure: the DFT one, or the user's file if it has the same cell
@@ -566,6 +567,8 @@ def dft_main(args,parser,config,inputs,dft_dir):
               formula=ref.atoms.get_chemical_formula(),n_kpoints=len(ref.kfrac),
               n_bands=int(ref.energies.shape[1]),occupied_bands=ref.nocc,occupied_from=ref.nocc_source,
               fermi_eV=ref.fermi,gap_on_path_eV=float(ref.energies[:,ref.nocc].min()-ref.energies[:,ref.nocc-1].max()),
+              midgap_eV=float(.5*(ref.energies[:,ref.nocc].min()+ref.energies[:,ref.nocc-1].max())),
+              spin_channel=ref.spin_channel,
               periodic_dim=dim,periodic_dim_from=dim_source,yaehmop_path=[l for _,l in er.ticks],
               yaehmop_points_per_line=step,structure=str(cif))
     (refdir/"dft_reference.json").write_text(json.dumps(info,indent=2)+"\n")
@@ -610,6 +613,16 @@ def dft_main(args,parser,config,inputs,dft_dir):
          "gap_weight":float(fit.get("gap_weight",".35")),"reg_weight":float(fit.get("reg_weight",".04")),
          "objective":obj,"objective_settings":obj_set,"basis_add":basis_add,
          "systems":[entry]}
+    start=args.start_from or (fit.get("start_from") and csv_path(fit["start_from"],inputs.parent))
+    if start:
+        start=Path(start).resolve()
+        table=start/"parameters_huckel.dat"
+        if not table.is_file():parser.error(f"--start-from: {table} not found")
+        yml["start_table"]=str(table)
+        sj=start/"fit_summary.json"
+        if sj.is_file():
+            yml["start_K"]=float(json.loads(sj.read_text())["K_EHT"])
+        print("START_FROM",start,flush=True)
     target=outdir/"fit_input.yaml"
     target.write_text(yaml.safe_dump(yml,sort_keys=False))
     base_calls,refinement_calls=run_optimizer(target,outdir,optimizer,budget,polish,args.seed,parser)
@@ -623,6 +636,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
                           window_metrics=met.get("window"))
     status={"reference_type":"dft","dft_reference":info,"cif":str(cif),"structure_format":sfmt,
         "objective":obj,"objective_settings":state.get("objective_settings"),"basis_added":state.get("basis_added"),
+        "start_from":str(start) if start else None,
         "window_metrics":met.get("window"),
         "cif_sha256":hashlib.sha256(Path(cif).read_bytes()).hexdigest(),
         "reference_input":str(npz),"input_sha256":hashlib.sha256(npz.read_bytes()).hexdigest(),
@@ -692,6 +706,9 @@ def main():
     parser.add_argument("--basis-add",default=None,
                         help="extra EHT shells, e.g. 'S:d Zn:d H:p' ([fit] basis_add); started from "
                              "estimates and fitted")
+    parser.add_argument("--start-from",type=Path,default=None,
+                        help="fitting/ folder of an earlier fit: start from its parameters (and basis), with "
+                             "the search bounds centred there ([fit] start_from)")
     parser.add_argument("--fitting-dir",type=Path,default=None,
                         help="folder for the standard fit outputs (parameters, figures, H(k), S(k)); "
                              "default OUTDIR/fitting")
@@ -704,6 +721,8 @@ def main():
                      "([reference] dft_file)")
     dft.add_argument("--valence-bands",type=int,help="occupied DFT bands, if the automatic count is wrong "
                      "([reference] valence_bands)")
+    dft.add_argument("--spin-channel",choices=("up","down"),help="one channel of a collinear spin-polarized run "
+                     "([reference] spin_channel); fit each channel, then join them with spin_combine.py")
     dft.add_argument("--dimension",type=int,choices=(1,2,3),help="periodic dimension for a DFT reference "
                      "(default: [band_path] dimension, else detected from the vacuum)")
     args=parser.parse_args()

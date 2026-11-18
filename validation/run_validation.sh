@@ -9,7 +9,7 @@ ROOT="$(dirname "$HERE")"
 WORK="${WORK:-$(mktemp -d)}"; mkdir -p "$WORK"
 for dir in "$HERE"/*/*/; do
     dir="${dir%/}"; code="$(basename "$(dirname "$dir")")"; name="$(basename "$dir")"
-    case "$code" in vasp|qe|siesta|aims) ;; *) continue ;; esac
+    case "$code" in vasp|qe|siesta|aims|wannier90) ;; *) continue ;; esac
     [ -e "$dir/SOC_ONLY" ] && continue    # spin-orbit references: soc_fit.py only
     echo "== $code/$name"
     python "$ROOT/USER_WORKFLOW/bands_fit.py" "$HERE/fit_settings.ini" \

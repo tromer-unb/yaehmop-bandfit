@@ -185,12 +185,26 @@ class Fitter:
             self.stockparams=extend_basis(self.stockparams,self.basis_add)
             self.basis_add={el:sorted(set(v)-before[el]-{"atnum","nval"}) for el,v in self.stockparams.items()
                             if set(v)-before[el]}
+        self.start_from=config.get("start_table")
+        if self.start_from:
+            # Start (and centre the bounds and the regularization) at an earlier fit:
+            # its shells replace the stock ones; shells it has and the stock lacks are added.
+            st=parse_parameter_table(self.start_from)
+            for el in self.stockparams:
+                if el in st:
+                    for orb in ("s","p","d","f"):
+                        if orb in st[el]:
+                            self.stockparams[el][orb]=dict(st[el][orb])
         self.objective_name=str(config.get("objective","frontier"))
         if self.objective_name not in OBJECTIVES:
             raise ValueError(f"objective must be one of {OBJECTIVES}")
         self.wset=WindowSettings.from_dict(config.get("objective_settings"))
         self.train=[parse_sample(e,base,self.stockparams,config) for e in self.train_entries]
         self.specs,self.stock,self.bounds,self.scales=build_specs(self.stockparams,elements)
+        if self.start_from and config.get("start_K") is not None:
+            iK=[i for i,s in enumerate(self.specs) if s[2]=="K"][0]
+            K0=float(config["start_K"]);self.stock[iK]=K0
+            self.bounds=list(self.bounds);self.bounds[iK]=(max(1.0,K0-0.6),min(2.8,K0+0.6))
         self.bounds=list(self.bounds)
         for i,spec in enumerate(self.specs):
             if spec[2]=="Hii":
@@ -433,7 +447,7 @@ def main():
       structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
                          for s in f.train},
       objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name=="window" else None,
-      basis_added=f.basis_add or None)
+      basis_added=f.basis_add or None,start_from=str(f.start_from) if f.start_from else None)
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

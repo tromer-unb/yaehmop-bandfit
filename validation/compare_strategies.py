@@ -36,7 +36,7 @@ KEYS = ("rms_within_2eV_of_EF_eV", "fermi_weighted_rms_eV", "gap_error_eV", "dir
 def examples(only):
     for d in sorted(HERE.glob("*/*/")):
         code = d.parent.name
-        if code not in ("vasp", "qe", "siesta", "aims"):
+        if code not in ("vasp", "qe", "siesta", "aims", "wannier90"):
             continue
         rel = f"{code}/{d.name}"
         if only and rel not in only:

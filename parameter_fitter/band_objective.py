@@ -48,6 +48,14 @@ class WindowSettings:
     w_high_symmetry: float = 4.0
     w_extrema: float = 4.0     # energies at the local maxima/minima of every band
     w_position: float = 2.0    # positions of those extrema along their segment
+    # Priority of named bands counted from the gap (v1 = top of the valence, c1 = bottom of
+    # the conduction): "v1:10 v2:6 v3:3 c1:10 c2:6 c3:3"; w_bands multiplies their RMS term
+    band_weights: str = ""
+    w_bands: float = 0.0
+    # Dispersion: differences between consecutive k points (dE along the path) of the
+    # compared bands, g- and band-weighted; and curvature (effective mass) at the VBM/CBM
+    w_slope: float = 0.0
+    w_mass: float = 0.0
 
     @classmethod
     def from_dict(cls, d):
@@ -56,10 +64,25 @@ class WindowSettings:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"Unknown objective settings: {sorted(unknown)}; valid: {sorted(names)}")
-        return cls(**{k: (int(v) if k == "n_cond" else float(v)) for k, v in d.items()})
+        conv = {"n_cond": int, "band_weights": str}
+        s = cls(**{k: conv.get(k, float)(v) for k, v in d.items()})
+        parse_band_weights(s.band_weights)
+        return s
 
     def to_dict(self):
         return asdict(self)
+
+
+def parse_band_weights(text):
+    """'v1:10 v2:6 c1:10' -> {('v', 1): 10.0, ('v', 2): 6.0, ('c', 1): 10.0}."""
+    out = {}
+    for item in str(text or "").replace(",", " ").split():
+        key, _, w = item.partition(":")
+        key = key.strip().lower()
+        if len(key) < 2 or key[0] not in "vc" or not key[1:].isdigit() or not w:
+            raise ValueError(f"band weight {item!r}: use v1:10 c2:5 (valence/conduction band counted from the gap)")
+        out[(key[0], int(key[1:]))] = float(w)
+    return out
 
 
 def _segments(x, nodes_x):
@@ -140,6 +163,37 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
             ext_w.append(G[i, j])
     rext = wrms(np.array(ext_e), np.array(ext_w)) if ext_e else 0.0
     rpos = wrms(np.array(ext_p), np.array(ext_w)) if ext_p else 0.0
+    # --- named bands (v1, v2..., c1, c2...) and dispersion
+    bw = parse_band_weights(s.band_weights)
+    col_w = np.ones(A.shape[1])                # per-band weight used by the slope term
+    per_band = {}
+    nb_num, nb_den = 0.0, 0.0
+    for (kind, k), w in bw.items():
+        j = ov - k if kind == "v" else ov + k - 1
+        if not 0 <= j < A.shape[1]:
+            continue
+        col_w[j] = max(col_w[j], w)
+        r = float(np.sqrt(np.mean(D[:, j] ** 2)))
+        per_band[f"rms_{kind}{k}_eV"] = r
+        nb_num += w * r ** 2; nb_den += w
+    rbands = float(np.sqrt(nb_num / nb_den)) if nb_den else 0.0
+    dA = np.diff(A, axis=0); dB = np.diff(B, axis=0)
+    same = np.diff(xs) > 1e-12                  # no step across a collapsed discontinuity
+    Wd = 0.5 * (G[1:] + G[:-1]) * col_w[None, :] * same[:, None]
+    rslope = wrms(dB - dA, Wd)
+
+    def curvature(e, i):
+        if 0 < i < len(e) - 1 and same[i - 1] and same[i]:
+            h1, h2 = xs[i] - xs[i - 1], xs[i + 1] - xs[i]
+            return 2 * (e[i + 1] * h1 + e[i - 1] * h2 - e[i] * (h1 + h2)) / (h1 * h2 * (h1 + h2))
+        return None
+    logs = []
+    for j, f in ((ov - 1, np.argmax), (ov, np.argmin)):
+        i = int(f(A[:, j]))
+        c_ref, c_eht = curvature(A[:, j], i), curvature(B[:, j], i)
+        if c_ref is not None and abs(c_ref) > 1e-6:
+            logs.append(float(np.clip(np.log(c_eht / c_ref), -2, 2)) if c_eht is not None and c_ref * c_eht > 0 else 2.0)
+    rmass = float(np.sqrt(np.mean(np.square(logs)))) if logs else 0.0
     terms = {
         "valence": s.w_valence * rv ** 2,
         "conduction": s.w_conduction * rc ** 2,
@@ -150,6 +204,9 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
         "cbm": s.w_cbm * (cb[0] ** 2 + cb[1] ** 2 + cb[2] ** 2),
         "high_symmetry": s.w_high_symmetry * rhs ** 2,
         "extrema": s.w_extrema * rext ** 2 + s.w_position * rpos ** 2,
+        "bands": s.w_bands * rbands ** 2,
+        "slope": s.w_slope * rslope ** 2,
+        "mass": s.w_mass * rmass ** 2,
     }
     window_rms = float(np.sqrt(np.mean(D[inside] ** 2)))
     near = inside & (np.abs(A - e_mid) <= 2.0)
@@ -163,6 +220,9 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
                 vbm_position_error=vb[1], cbm_position_error=cb[1],
                 rms_high_symmetry_eV=rhs, rms_extrema_eV=rext,
                 n_valence_compared=int(nv), n_conduction_compared=int(nc),
+                rms_named_bands_eV=rbands, rms_slope_eV=rslope, mass_log_error=rmass,
+                rms_v1v3_c1c3_eV=float(np.sqrt(np.mean(D[:, max(0, ov - 3):ov + 3] ** 2))),
+                **per_band,
                 **{f"term_{k}": float(v) for k, v in terms.items()})
 
 
