@@ -1,0 +1,27 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  O1       s            0  0
+     2  O1       px           1  1
+     3  O1       py           1 -1
+     4  O1       pz           1  0
+     5  Al2      s            0  0
+     6  Al2      px           1  1
+     7  Al2      py           1 -1
+     8  Al2      pz           1  0
+     9  Al2      dx2-y2       2  2
+    10  Al2      dz2          2  0
+    11  Al2      dxy          2 -2
+    12  Al2      dxz          2  1
+    13  Al2      dyz          2 -1
+    14  Al3      s            0  0
+    15  Al3      px           1  1
+    16  Al3      py           1 -1
+    17  Al3      pz           1  0
+    18  Al3      dx2-y2       2  2
+    19  Al3      dz2          2  0
+    20  Al3      dxy          2 -2
+    21  Al3      dxz          2  1
+    22  Al3      dyz          2 -1
+    23  O4       s            0  0
+    24  O4       px           1  1
+    25  O4       py           1 -1
+    26  O4       pz           1  0

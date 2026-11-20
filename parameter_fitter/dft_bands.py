@@ -54,6 +54,7 @@ class DFTBands:
     notes: list = field(default_factory=list)
     nocc_source: str = ""
     spin_channel: str | None = None
+    metallic: bool = False        # no gap: bands are aligned at the Fermi level
 
 
 def normalize_code(code):
@@ -869,11 +870,28 @@ def read_wannier90(folder, dft_file=None, soc=False):
                     nocc_source=f"Fermi level ({src})")
 
 
+def _read_metal(folder, code, dft_file, soc):
+    """Run a reader that may refuse a metal while counting occupied bands: the count is
+    irrelevant here, so a gap/occupation refusal is retried with a dummy count."""
+    global nocc_from_fermi
+    orig = nocc_from_fermi
+    nocc_from_fermi = lambda E, fermi, tol=0.05, reach=0.3: max(1, int(np.sum(np.asarray(E).max(axis=0) <= fermi)))
+    try:
+        return READERS[normalize_code(code)](folder, dft_file, soc=soc)
+    finally:
+        nocc_from_fermi = orig
+
+
 READERS = {"vasp": read_vasp, "qe": read_qe, "siesta": read_siesta, "aims": read_aims, "wannier90": read_wannier90}
 
 
-def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, spin_channel=None):
+def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, spin_channel=None,
+                   metallic=False, fermi=None):
     """Read a DFT band-structure folder; checks for a positive gap.
+
+    metallic=True accepts a metal (no gap check): the bands are fitted relative to the
+    Fermi level (objective 'metal'); `fermi` (eV) replaces the Fermi level of the
+    files, e.g. by the one of the self-consistent run.
 
     soc=True reads a spin-orbit (noncollinear) calculation instead: every band is a
     spinor holding one electron, so nocc counts electrons, not pairs.
@@ -890,9 +908,28 @@ def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, s
         raise ValueError("spin_channel must be up or down")
     _SPIN_CHANNEL = ch
     try:
-        ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
+        if metallic:
+            ref = _read_metal(folder, code, dft_file, soc)
+        else:
+            ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
     finally:
         _SPIN_CHANNEL = None
+    if fermi is not None:
+        ref.notes.append(f"Fermi level set by the user: {float(fermi):.4f} eV (file: {ref.fermi})")
+        ref.fermi = float(fermi)
+    if metallic:
+        if ref.fermi is None:
+            raise ValueError("a metallic reference needs the Fermi level (set fermi in [reference])")
+        E = np.sort(np.asarray(ref.energies, float), axis=1)
+        ref.energies = E
+        ref.nocc = int(np.sum(E.max(axis=0) <= ref.fermi))   # bands entirely below E_F (information only)
+        ref.nocc_source = f"metal: {ref.nocc} bands entirely below E_F = {ref.fermi:.4f} eV"
+        ref.metallic = True
+        if ch is not None:
+            ref.spin_channel = "up" if ch == 1 else "down"
+        if ref.energies.ndim != 2 or len(ref.kfrac) != len(ref.energies) or len(ref.kfrac) < 2:
+            raise ValueError("Inconsistent k points / eigenvalues")
+        return ref
     if ch is not None:
         if ref.fermi is None:
             raise ValueError("a spin channel needs the Fermi level of the run (not found)")

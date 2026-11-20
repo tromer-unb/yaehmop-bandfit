@@ -165,6 +165,45 @@ def write_full_comparison(npz,out_dir,*,title,emin=None,emax=None,window_metrics
         w.writerows(np.column_stack((k,R,E)))
     return out_dir/"bands_full_comparison.png"
 
+def write_metal_plots(npz,out_dir,*,title,emin=None,emax=None):
+    """Metallic reference: bands relative to E_F (DFT blue, EHT red dashed), two figures:
+    bands_comparison (the fitted window) and bands_full_comparison (wider range)."""
+    out_dir=Path(out_dir);d=np.load(npz)
+    k=np.asarray(d["k"],float);R=np.asarray(d["reference_all"],float);E=np.asarray(d["YAeHMOP_all"],float)
+    ref=np.asarray(d["reference"],float);sel=np.asarray(d["YAeHMOP"],float)
+    wlo,whi=[float(v) for v in d["window"]]
+    inside=(ref>=wlo)&(ref<=whi);D=(sel-ref)[inside]
+    near=inside&(np.abs(ref)<=1.0)
+    m=dict(rmse=float(np.sqrt(np.mean(D**2))),mae=float(np.mean(np.abs(D))),maxabs=float(np.abs(D).max()),
+           near=float(np.sqrt(np.mean(((sel-ref)[near])**2))) if near.any() else 0.0)
+    for tag,(lo,hi) in (("bands_comparison",(wlo-.5,whi+.5)),
+                        ("bands_full_comparison",(min(wlo,-6.) if emin is None else emin,whi+3 if emax is None else emax))):
+        fig,ax=plt.subplots(figsize=(9.7,7.0 if tag.endswith("full_comparison") else 6.4))
+        for j in range(R.shape[1]):
+            if R[:,j].max()<lo-1 or R[:,j].min()>hi+1:continue
+            ax.plot(k,R[:,j],color=REF_COLOR,lw=1.5,label="DFT (reference)" if j==0 else None)
+        for j in range(E.shape[1]):
+            if E[:,j].max()<lo-1 or E[:,j].min()>hi+1:continue
+            ax.plot(k,E[:,j],color=EHT_COLOR,lw=1.4,ls="--",label="EHT (YAeHMOP)" if j==0 else None)
+        ax.axhline(0,color="0.45",lw=.7,ls=":");ax.text(1.005,0,"E$_F$",transform=ax.get_yaxis_transform(),va="center",fontsize=9)
+        if tag=="bands_full_comparison":
+            ax.axhspan(wlo,whi,color="0.5",alpha=.06,lw=0)
+        ax.set_ylim(lo,hi);_ticks(ax,d);ax.grid(alpha=.16)
+        ax.set_ylabel("Energy relative to the Fermi level (eV)");ax.set_title(title)
+        h,l=ax.get_legend_handles_labels();keep=dict(zip(l,h))
+        fig.tight_layout(rect=(0,.13,1,1))
+        ax.legend(keep.values(),keep.keys(),frameon=False,loc="upper left",bbox_to_anchor=(0,-.10),fontsize=9.5)
+        txt=(f"Metal: bands aligned at E$_F$ (EHT shifted by the optimal constant)\n"
+             f"Fit window [{wlo:+.1f}, {whi:+.1f}] eV:  RMSE = {m['rmse']:.3f} eV   MAE = {m['mae']:.3f} eV   "
+             f"max |ΔE| = {m['maxabs']:.3f} eV\nwithin ±1 eV of E$_F$: RMSE = {m['near']:.3f} eV")
+        fig.text(.985,.015,txt,ha="right",va="bottom",fontsize=9,bbox=dict(boxstyle="round,pad=.45",fc="white",ec="0.6"))
+        fig.savefig(out_dir/f"{tag}.png",dpi=220);fig.savefig(out_dir/f"{tag}.pdf");plt.close(fig)
+        with (out_dir/f"{tag}.csv").open("w",newline="") as f:
+            w=csv.writer(f)
+            w.writerow(["k"]+[f"DFT_band_{j+1}" for j in range(R.shape[1])]+[f"EHT_orbital_{j+1}" for j in range(E.shape[1])])
+            w.writerows(np.column_stack((k,R,E)))
+    return m
+
 def plot_full(k,E,out,*,name,nocc,emin=-6,emax=6):
     # The full original EHT orbital basis may contain high-energy states
     # not constrained by fitting 1V+1C; DO NOT let those untrained
@@ -255,7 +294,7 @@ def write_tb_header(fermi,cell,nbasis,nvec):
     s+="".join(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n" for v in np.asarray(cell))
     return s+f"{nbasis}\n{nvec}\n"
 
-def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None):
+def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None,energy_zero=None):
     """Text files with the YAeHMOP Hamiltonian and overlap of the final parameters.
 
     Two extra YAeHMOP runs ('K points' + Dump Hamil/Overlap): the full
@@ -293,10 +332,32 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
         return sum(np.exp(2j*np.pi*(q@R))*(H if which=="H" else S) for R,H,S in kept)
     errH=max(np.abs(rebuild(q,"H")-Hp[i]).max() for i,q in enumerate(kpoints))
     errS=max(np.abs(rebuild(q,"S")-Sp[i]).max() for i,q in enumerate(kpoints))
-    eig=np.array([sl.eigh(Hp[i],Sp[i],eigvals_only=True) for i in range(len(kpoints))])
-    eigm=np.array([sl.eigh(Hm[i],Sm[i],eigvals_only=True) for i in range(len(mesh))])
-    allE=np.vstack([eig,eigm]);vbm=float(allE[:,nocc-1].max());cbm=float(allE[:,nocc].min())
-    mid=.5*(vbm+cbm)
+    # The matrices are written whatever happens; the eigenvalue checks need S(k) positive definite.
+    smin=float(min(np.linalg.eigvalsh(S).min() for S in list(Sp)+list(Sm)))
+    warning=None
+    if smin<=1e-8:
+        warning=(f"overlap S(k) is not positive definite (smallest eigenvalue {smin:.3e}): the basis is nearly "
+                 "linearly dependent; H(R), S(R) were written but the generalized eigenproblem is ill-posed")
+        print("WARNING",warning,flush=True)
+        # eigenvalues in the subspace of S above the threshold (canonical orthogonalization)
+        def geig(H,S):
+            w,U=np.linalg.eigh(S);keep=w>1e-8*max(w.max(),1.)
+            X=U[:,keep]/np.sqrt(w[keep]);e=np.linalg.eigvalsh(X.conj().T@H@X)
+            return np.concatenate([e,np.full(H.shape[0]-len(e),np.inf)])
+    else:
+        geig=lambda H,S:sl.eigh(H,S,eigvals_only=True)
+    eig=np.array([geig(Hp[i],Sp[i]) for i in range(len(kpoints))])
+    eigm=np.array([geig(Hm[i],Sm[i]) for i in range(len(mesh))])
+    allE=np.vstack([eig,eigm])
+    metal=None
+    if energy_zero is None:
+        vbm=float(allE[:,nocc-1].max());cbm=float(allE[:,nocc].min());mid=.5*(vbm+cbm)
+    else:
+        # Metal: the zero is the EHT energy that matches the DFT Fermi level. States below it
+        # on the (2r+1)^dim mesh = electrons per cell in this (spin) channel (one per state).
+        vbm=cbm=None;mid=float(energy_zero)
+        metal=dict(eht_fermi_eV=mid,states_below_EF_per_cell_mesh=float(np.sum(eigm<=mid)/len(mesh)),
+                   mesh_note="Gamma-centred (2r+1)^dim mesh, equal weights, no smearing: a rough count")
     labels=orbital_labels(params,syms);n=len(labels)
     cell=np.asarray(atoms.cell)
     fdir=Path(fdir)
@@ -339,8 +400,10 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
                             f"{Hp[q][i,j].imag:.10f}   {Sp[q][i,j].real:.10f}   {Sp[q][i,j].imag:.10f}\n")
     return dict(n_orbitals=n,n_cells=len(kept),overlap_radius=int(radius),mesh_points=len(mesh),
                 max_error_rebuilt_Hk_eV=float(errH),max_error_rebuilt_Sk=float(errS),
-                eht_vbm_eV=vbm,eht_cbm_eV=cbm,eht_midgap_eV=mid,
-                huckel_NP_energy_zero="H(R) in huckel-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0",
+                eht_vbm_eV=vbm,eht_cbm_eV=cbm,eht_midgap_eV=mid,metal=metal,
+                overlap_min_eigenvalue=smin,warning=warning,
+                huckel_NP_energy_zero=("H(R) in huckel-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0"
+                    if metal is None else "metal: H(R) - E0*S(R), E0 = eht_midgap_eV = EHT energy of the DFT Fermi level; Fermi level 0"),
                 high_symmetry_k_in_hamiltonian_overlap_k=len(nodes))
 
 FITTING_README="""Outputs of one EHT (YAeHMOP) fit (all plain text except the figures)
@@ -395,7 +458,7 @@ def portable_paths(obj,fdir):
             return q.name+tail
     return obj
 
-def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,dim,radius,summary,node_index=None):
+def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,dim,radius,summary,node_index=None,energy_zero=None):
     """Standard output folder of every fit: parameters, figures, H(k) and S(k)."""
     import shutil
     fdir=Path(fdir);fdir.mkdir(parents=True,exist_ok=True)
@@ -413,7 +476,7 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
     # The structure used (exact cell of huckel-NP.dat), so that fitting/ is self-contained
     from ase.io import write as ase_write
     ase_write(fdir/"POSCAR",read_structure(structure,sfmt),format="vasp",direct=True)
-    info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index)
+    info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index,energy_zero)
     summary=dict(summary,structure_in_fitting="POSCAR",
                  tight_binding_files=dict(info,files=["huckel-NP.dat","basis_set-NP","orbitals.dat",
                                                               "hamiltonian_overlap_k.dat"]))
@@ -475,6 +538,13 @@ def optimizer_settings(args,fit,parser,check_budget=True):
 def plot_dft_preview(ref,er,pairs,out,title):
     """QA figure of the DFT bands read from the folder, fitted ones highlighted."""
     T=er.energies;dn=ref.nocc
+    if getattr(ref,"metallic",False):
+        fig,ax=plt.subplots(figsize=(9.7,5.5))
+        for j in range(T.shape[1]):ax.plot(er.x,T[:,j]-ref.fermi,color=REF_COLOR,lw=1.2)
+        _ticks(ax,dict(tick_x=[x for x,_ in er.ticks],tick_labels=[l for _,l in er.ticks]))
+        ax.set_ylim(-10,8);ax.axhline(0,color="0.6",lw=.5,ls=":")
+        ax.set_ylabel("DFT energy relative to E$_F$ (eV)");ax.set_title(title+" (metal)")
+        fig.tight_layout();fig.savefig(out,dpi=180);plt.close(fig);return
     mid=.5*(T[:,dn].min()+T[:,dn-1].max())
     fig,ax=plt.subplots(figsize=(9.7,5.5))
     for j in range(T.shape[1]):
@@ -512,6 +582,60 @@ def evaluate_dft(entry,parameters,K,outdir,name,pairs,window):
     write_full_comparison(npz,outdir,title=f"{name} — all bands, EHT vs DFT",emin=window[0],emax=window[1])
     return met
 
+def evaluate_metal(entry,parameters,K,outdir,name,obj_set,window):
+    """One YAeHMOP run of given parameters against a metallic DFT reference, with figures."""
+    from fit_sparse_window import parse_sample,metal_scores,write_sample_input
+    from band_objective import WindowSettings
+    bind,_=resolve_yaehmop_assets()
+    table=parse_parameter_table(parameters)
+    syms=read_structure(entry["structure"],entry.get("structure_format")).get_chemical_symbols()
+    params=subset_for_elements(table,list(dict.fromkeys(syms)))
+    s=parse_sample(entry,outdir,params,{})
+    wset=WindowSettings.from_dict(obj_set)
+    work=outdir/"work";work.mkdir(parents=True,exist_ok=True)
+    write_parameter_file(work/"eval.parms",params)
+    inp=write_sample_input(s,work/"eval.bind",float(K))
+    run_bind(bind,inp,work/"eval.parms",work/"eval.log")
+    _,full=parse_band(str(inp)+".band")
+    met,b,Eall=metal_scores(full,s,wset)
+    npz=outdir/f"{name}_bands.npz"
+    np.savez_compressed(npz,k=s["kx"],reference=s["target"],YAeHMOP=b,reference_all=s["target_all"],YAeHMOP_all=Eall,
+        tick_x=np.array([x for x,_ in s["ticks"]],float),tick_labels=np.array([l for _,l in s["ticks"]]),
+        metallic=True,window=np.array([wset.window_min,wset.window_max]))
+    write_metal_plots(npz,outdir,title=f"{name} — EHT vs DFT (metal)")
+    return met
+
+def metal_finish(args,outdir,name,met,state,bnpz,info,cif,sfmt,npz,obj,start,budget,optimizer,polish,
+                 base_calls,refinement_calls,dim,radius,er,step,window):
+    """Figures, run_summary.json and fitting/ of a fit to a metallic reference."""
+    ch=info.get("spin_channel")
+    m=write_metal_plots(bnpz,outdir,title=f"{name} — EHT fit vs DFT"+(f" (spin {ch})" if ch else "")+", metal")
+    status={"reference_type":"dft","metallic":True,"dft_reference":info,"cif":str(cif),"structure_format":sfmt,
+        "objective":obj,"objective_settings":state.get("objective_settings"),"basis_added":state.get("basis_added"),
+        "start_from":str(start) if start else None,"window_metrics":met.get("window"),
+        "cif_sha256":hashlib.sha256(Path(cif).read_bytes()).hexdigest(),
+        "reference_input":str(npz),"input_sha256":hashlib.sha256(npz.read_bytes()).hexdigest(),
+        "optimizer_evaluations":state["objective_evaluations"],
+        "initialization_calls":base_calls,"refinement_calls":refinement_calls,
+        "requested_total_budget":budget,"optimizer_choice":optimizer,"polish":polish,
+        "selected_rmse_eV":met["selected_rmse_eV"],"rms_within_1eV_of_EF_eV":m["near"],
+        "eht_fermi_eV":met["eht_fermi_eV"],
+        "K_EHT":state["best_x"]["GLOBAL__K"],"periodic_dim":dim,"overlap_radius":int(radius),
+        "native_parameters":str(outdir/"fit/param_best_native.dat"),
+        "figure":str(outdir/"bands_comparison.png"),"full_figure":str(outdir/"bands_full_comparison.png"),
+        "note":"Metal: DFT bands relative to E_F, paired from the bottom with the EHT bands; EHT shifted by the "
+               "constant minimizing the weighted RMS; selected_rmse_eV = RMSE inside the fit window"}
+    (outdir/"run_summary.json").write_text(json.dumps(status,indent=2)+"\n")
+    write_fitting_dir(args.fitting_dir or outdir/"fitting",outdir,structure=cif,sfmt=sfmt,
+        native=outdir/"fit/param_best_native.dat",param_txt=outdir/"fit/param_best.txt",
+        K=state["best_x"]["GLOBAL__K"],kpoints=path_kpoints(er.nodes,step)[er.mask],dim=dim,
+        radius=int(radius),summary=dict(name=name,metrics=met,**status),
+        node_index=node_positions(len(er.nodes),step,er.mask),energy_zero=met["eht_fermi_eV"])
+    print("USER_FIT_DONE",name,"metal window RMSE_eV",round(m["rmse"],5),"within 1 eV of E_F",round(m["near"],5))
+    print("BEST_PARAMS",outdir/"fit/param_best_native.dat")
+    print("BANDS_PLOT",outdir/"bands_comparison.png")
+    print("FULL_PLOT",outdir/"bands_full_comparison.png")
+
 def objective_config(args,config,default):
     """objective, its settings ([objective] section) and the extra basis shells."""
     from band_objective import WindowSettings,parse_basis_add
@@ -538,8 +662,10 @@ def dft_main(args,parser,config,inputs,dft_dir):
     outdir=args.outdir.resolve();outdir.mkdir(parents=True,exist_ok=True)
     refdir=outdir/"dft_reference";refdir.mkdir(exist_ok=True)
     spin_ch=args.spin_channel or ref_cfg.get("spin_channel",fallback=None)
+    metallic=(args.objective or fit.get("objective",fallback="window"))=="metal"
+    fermi_user=ref_cfg.getfloat("fermi",fallback=None)
     try:
-        ref=read_dft_bands(dft_dir,code,dft_file,vb,spin_channel=spin_ch)
+        ref=read_dft_bands(dft_dir,code,dft_file,vb,spin_channel=spin_ch,metallic=metallic,fermi=fermi_user)
     except (ValueError,FileNotFoundError) as exc:
         parser.error(f"DFT folder {dft_dir}: {exc}")
     # Structure: the DFT one, or the user's file if it has the same cell
@@ -566,8 +692,10 @@ def dft_main(args,parser,config,inputs,dft_dir):
     info=dict(dft_dir=str(Path(dft_dir).resolve()),code=code,files=ref.files,notes=ref.notes,
               formula=ref.atoms.get_chemical_formula(),n_kpoints=len(ref.kfrac),
               n_bands=int(ref.energies.shape[1]),occupied_bands=ref.nocc,occupied_from=ref.nocc_source,
-              fermi_eV=ref.fermi,gap_on_path_eV=float(ref.energies[:,ref.nocc].min()-ref.energies[:,ref.nocc-1].max()),
-              midgap_eV=float(.5*(ref.energies[:,ref.nocc].min()+ref.energies[:,ref.nocc-1].max())),
+              fermi_eV=ref.fermi,
+              gap_on_path_eV=None if metallic else float(ref.energies[:,ref.nocc].min()-ref.energies[:,ref.nocc-1].max()),
+              midgap_eV=None if metallic else float(.5*(ref.energies[:,ref.nocc].min()+ref.energies[:,ref.nocc-1].max())),
+              metallic=metallic,energy_zero_eV=ref.fermi if metallic else None,
               spin_channel=ref.spin_channel,
               periodic_dim=dim,periodic_dim_from=dim_source,yaehmop_path=[l for _,l in er.ticks],
               yaehmop_points_per_line=step,structure=str(cif))
@@ -580,6 +708,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
     entry={"name":name,"role":"train","weight":1.0,"structure":str(cif),"structure_format":sfmt,
            "reference":str(npz),"reference_format":"dft","point_dim":dim,"n_pairs":pairs,
            "points_per_line":step}
+    if metallic:entry["metallic"]=True
     window=(ref_cfg.getfloat("emin",fallback=-6.),ref_cfg.getfloat("emax",fallback=6.))
     if args.validate_only or args.prepare_only:
         print("PREPARED_ONLY: review",refdir/"dft_bands_preview.png","before fitting.")
@@ -592,14 +721,22 @@ def dft_main(args,parser,config,inputs,dft_dir):
             if args.k is None:parser.error("--k is required with --from-parameters")
             K=args.k;table=args.from_parameters.resolve()
         entry["overlap_radius"]=radius
-        met=evaluate_dft(entry,table,K,outdir,name,pairs,window)
+        if metallic:
+            try:
+                obj,obj_set,_=objective_config(args,config,"metal")
+            except ValueError as exc:
+                parser.error(str(exc))
+            met=evaluate_metal(entry,table,K,outdir,name,obj_set,window)
+        else:
+            met=evaluate_dft(entry,table,K,outdir,name,pairs,window)
         (outdir/"evaluation_summary.json").write_text(json.dumps(dict(parameters=str(table),K_EHT=K,
             dft_reference=info,metrics=met),indent=2)+"\n")
         ptxt=table.parent/"param_best.txt" if args.from_fit else None
         write_fitting_dir(args.fitting_dir or outdir/"fitting",outdir,structure=cif,sfmt=sfmt,
             native=table,param_txt=ptxt,K=K,kpoints=path_kpoints(er.nodes,step)[er.mask],dim=dim,
             radius=int(radius),summary=dict(name=name,mode="evaluation (no refit)",parameters=str(table),
-            K_EHT=K,metrics=met,dft_reference=info),node_index=node_positions(len(er.nodes),step,er.mask))
+            K_EHT=K,metrics=met,dft_reference=info),node_index=node_positions(len(er.nodes),step,er.mask),
+            energy_zero=met.get("eht_fermi_eV"))
         print("DFT_EVALUATION_DONE",name,"RMSE_eV",round(met["selected_rmse_eV"],5),
               "gap_error_eV",round(met["gap_error_eV"],4))
         print("BANDS_PLOT",outdir/"bands_comparison.png");print("FULL_PLOT",outdir/"bands_full_comparison.png")
@@ -629,6 +766,9 @@ def dft_main(args,parser,config,inputs,dft_dir):
     state=json.loads((outdir/"fit/fit.json").read_text())
     met=state["metrics"][name]
     bnpz=outdir/"fit"/f"{name}_bands.npz"
+    if metallic:
+        return metal_finish(args,outdir,name,met,state,bnpz,info,cif,sfmt,npz,obj,start,budget,optimizer,polish,
+                            base_calls,refinement_calls,dim,radius,er,step,window)
     rmse=write_bands_plot(bnpz,outdir,2*pairs,title=f"{name} — {pairs}VB + {pairs}CB, EHT fit to DFT")
     if abs(rmse-float(met["selected_rmse_eV"]))>1e-8:
         raise ValueError("Figure disagrees with optimizer metric")
@@ -699,7 +839,7 @@ def main():
     parser.add_argument("--polish",choices=POLISH_METHODS,default=None,
                         help="local refinement after a global optimizer (25%% of the budget)")
     parser.add_argument("--seed",type=int,default=20261014)
-    parser.add_argument("--objective",choices=("frontier","window"),default=None,
+    parser.add_argument("--objective",choices=("frontier","window","metal"),default=None,
                         help="frontier: n_pairs bands around the gap (image/CSV default); window: every DFT band "
                              "in an energy window with weights on gaps, band edges, Fermi-level states, critical "
                              "points (DFT default; settings in [objective])")

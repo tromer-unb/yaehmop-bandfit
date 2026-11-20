@@ -1,0 +1,10 @@
+# Only the two best protocols go to the repository; the other protocol folders stay local.
+*
+!.gitignore
+!metal-cmaes-10k/
+!metal-cmaes-10k/**
+!metal-de/
+!metal-de/**
+# large matrix files are stored compressed (.gz); the plain files stay local
+metal-cmaes-10k/spin_polarized/huckel-SP.dat
+metal-de/spin_polarized/huckel-SP.dat

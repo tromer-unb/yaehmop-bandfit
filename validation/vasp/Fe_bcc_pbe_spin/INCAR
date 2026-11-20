@@ -1,0 +1,5 @@
+SYSTEM = Fe bcc bands
+GGA = PE ; ENCUT = 350 ; PREC = Accurate
+ISPIN = 2 ; MAGMOM = 3
+ISMEAR = 1 ; SIGMA = 0.1 ; ICHARG = 11 ; NBANDS = 16
+LWAVE = .FALSE. ; LCHARG = .FALSE.

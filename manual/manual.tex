@@ -509,6 +509,14 @@ not a rigid shift when $S\neq I$, so with this choice it reproduces the YAeHMOP 
 (checked for MoS$_2$: $10^{-4}$~eV near the gap). Add $E_{\rm mid}$ (\cmd{fit\_summary.json}) for absolute energies.
 \cmd{ImH} is zero (real orbitals).
 
+\paragraph{Exportability of $H$ and $S$.} Very diffuse shells (small $\zeta$, often added ones) can make the overlap
+matrix nearly linearly dependent; with the lattice sums cut at $r$ cells, $S(\mathbf k)$ can even lose positive
+definiteness, and then the generalized eigenproblem $(H,S)$ is ill-posed for any program reading the files. The fitter
+prevents this: every candidate that becomes the best so far is accepted only if the smallest eigenvalue of $S(\mathbf k)$
+on the export mesh is at least \cmd{overlap\_min\_eig} (\cmd{[fit]}, default $10^{-3}$; 0 switches the check off);
+\cmd{fit.json} records the number of checks and rejected candidates. The export itself never stops: the smallest
+eigenvalue is written to \cmd{fit\_summary.json} (\cmd{overlap\_min\_eigenvalue}) with a warning if it is not positive.
+
 \paragraph{\cmd{basis\_set-NP} and \cmd{orbitals.dat}.} One line per orbital, in the order of the matrices:
 s; $p_x,p_y,p_z$; $d_{x^2-y^2},d_{z^2},d_{xy},d_{xz},d_{yz}$; f. The $(l,m)$ follow sisl's real spherical
 harmonics: $p_x$ $m{=}1$, $p_y$ $m{=}{-1}$, $p_z$ $m{=}0$; $d_{xy}$ $-2$, $d_{yz}$ $-1$, $d_{z^2}$ 0, $d_{xz}$ 1,
@@ -749,7 +757,8 @@ MoS$_2$ & FHI-aims PBE & targeted refinement & 0.180 & $-0.056$ \\
 3C-SiC & QE PBE & window, GA + NM, ext.\ basis & 0.266 & $+0.190$ \\
 Si diamond & QE LDA & window, GA + NM, ext.\ basis & 0.220 & $+0.021$ \\
 Si wurtzite & QE LDA & window, GA + NM, ext.\ basis & 0.225 & $+0.002$ \\
-Al$_2$O$_2$ bilayer & SIESTA & window, CMA-ES + NM & 0.092 & $+0.028$ \\
+Al$_2$O$_2$ bilayer & SIESTA & targeted (VB1, CB1--3), CMA-ES + NM, Al $d$ & 0.075 & $-0.006$ \\
+Fe bcc, spin up / down & VASP PBE (metal) & metal, CMA-ES + NM & 0.045 / 0.136 & metal \\
 C$_{52}$H$_{16}$ nanoribbon & SIESTA PBE & window, GA + NM, ext.\ basis & 0.119 & $+0.035$ \\
 In$_2$S$_2$ & VASP PBE & targeted refinement (VB1--3, CB1--2) & 0.193 & $+0.106$ \\
 TiBr$_2$ & VASP PBE & window, GA + NM & 0.208 & $-0.059$ \\
@@ -759,11 +768,18 @@ Si diamond & Wannier90 (VASP PBE) & targeted refinement & 0.192 & $+0.013$ \\
 TiBr$_2$ & Wannier90 (VASP PBE) & window, CMA-ES + NM & 0.170 & $+0.038$ \\
 \bottomrule
 \end{tabularx}\end{center}
-{\footnotesize RMS$_{\le 2\,\mathrm{eV}}$: RMS (eV) of the states within 2~eV of $E_F$; gap err.: EHT$-$DFT gap (eV).}
+{\footnotesize RMS$_{\le 2\,\mathrm{eV}}$: RMS (eV) of the states within 2~eV of $E_F$ (for Fe, a metal, $E_F$ is the DFT Fermi
+level, section~\ref{sec:spin}); gap err.: EHT$-$DFT gap (eV).}
 
 Lessons: the window objective beats the frontier one everywhere; the extended basis is needed for Si, SiC, GaN, the
 nanoribbon and ZnI$_2$ (the stock table has no Zn $3d$); genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as best
-optimizer; named-band weights with a warm start fix the bands nearest $E_F$ (ZnI$_2$: VB1--3 within 0.06~eV). Conduction bands
+optimizer; named-band weights with a warm start fix the bands nearest $E_F$ (ZnI$_2$: VB1--3 within 0.06~eV).
+For the Al$_2$O$_2$ bilayer only VB1 and CB1--3 were fitted (window from 2.6~eV below the VBM, \cmd{n\_cond = 3}, weight 10
+on each of the four bands; \cmd{validation/refine\_v1c3/}); with the minimal $s,p$ basis no optimizer goes below
+0.6--0.9~eV on CB1--3, while adding the Al $3d$ shell (\cmd{basis\_add = Al:d}) gives VB1 0.06, CB1 0.16, CB2 0.30 and
+CB3 0.36~eV (before: CB1--3 0.4--1.4~eV off); the smallest eigenvalue of $S(\mathbf k)$ is 0.107, so $H$ and $S$ export
+safely. Adding O $3d$ as well drove the search to very diffuse shells with a non-positive-definite $S$ and no better fit;
+such candidates are now rejected during the fit (section~\ref{sec:outputs}). Conduction bands
 that are delocalized in the vacuum (In$_2$S$_2$ CB3 and above: $\approx$27\% of the charge in the atomic spheres of the PROCAR)
 cannot be represented by the minimal EHT basis and are better left out of the fit. QE \cmd{bands.x} files reorder the bands
 through crossings; the reader sorts the eigenvalues at every k.
@@ -847,9 +863,47 @@ S=\begin{pmatrix}S_\uparrow & 0\\ 0 & S_\downarrow\end{pmatrix},
 where the up--down blocks are written as zero and $\delta_\sigma=(E^{\rm DFT}_{{\rm mid},\sigma}-E^{\rm DFT}_F)$ restores the
 relative position of the two channels (exchange splitting), since each channel fit is aligned at its own midgap. Output:
 \cmd{huckel-SP.dat} (WanTiBEXOS \cmd{SP} format, Fermi level 0), \cmd{basis\_set-SP} (spin column 1 then $-1$), the two
-parameter tables and \cmd{fit\_summary.json}. Checked with synthetic data (the eigenvalues of the joined $H$ are the union of
-the two shifted channels); the two spin-polarized band runs found locally were incomplete, so no real example is in
-\cmd{validation/} yet.
+parameter tables and \cmd{fit\_summary.json}; the eigenvalues of the joined $H$ are the union of the two shifted channels.
+
+\paragraph{Metals (\cmd{--objective metal}).} A metal has no gap, so there is no midgap or VBM to align at. With
+\cmd{objective = metal} the DFT bands are taken relative to the Fermi level and paired from the bottom with the EHT bands
+(DFT band $j$ $\leftrightarrow$ EHT band $j$). EHT has no absolute energy scale, so its bands are shifted by the constant
+$c$ that minimizes the weighted RMS (closed form: the $g$-weighted mean of $E^{\rm DFT}-E^{\rm EHT}$); $-c$ is then the
+Fermi level of the model, and \cmd{huckel-NP.dat} is written as $H(\mathbf R)+cS(\mathbf R)$ with $E_F=0$. The window
+\cmd{window\_min}..\cmd{window\_max} is relative to $E_F$ and the weight $g(E)=w_{\rm far}+(1-w_{\rm far})e^{-|E|/E_s}$ is
+largest at $E_F$; the terms are the weighted RMS, a sharper frontier term (\cmd{frontier\_scale}), high-symmetry points,
+local extrema and slope (same names as for \cmd{window}). \cmd{fermi = ...} in \cmd{[reference]} replaces the Fermi level
+of the band files: use the self-consistent one, since a non-self-consistent band run gives a less reliable value. As a
+check, \cmd{fit\_summary.json} counts the EHT states below the model $E_F$ on the export mesh (electrons per cell in that
+channel). For a spin channel of a metal the two fits are already at the common $E_F$, so \cmd{spin\_combine.py} adds no
+shift ($\delta_\sigma=0$).
+
+\paragraph{Example: ferromagnetic bcc Fe.} \cmd{validation/vasp/Fe\_bcc\_pbe\_spin} (VASP PBE, \cmd{ISPIN = 2},
+$m=2.24\,\mu_B$, Fermi level of the SCF run 5.864~eV), fitted with \cmd{validation/refine\_fe/} (window $-9..+3$~eV,
+$E_s=2$~eV, $w_{\rm far}=0.15$; one fit per channel, both channels in parallel, then \cmd{spin\_combine.py}). The Fe
+$4s\,4p\,3d$ basis has its own parameters in each channel. Protocols: CMA-ES + NM with 3000 and 10\,000 calls,
+differential evolution, genetic algorithm, Bayesian optimization, and CMA-ES with more weight at $E_F$. Best
+(\cmd{fitting/metal-cmaes-10k}):
+\begin{center}\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l r r r r r r}
+\toprule
+channel & RMS win. & RMS $\pm2$ & RMS $\pm1$ & max $|\Delta E|$ & $N_e$ EHT / DFT & min eig.\ $S$ \\
+\midrule
+stock, up & 0.992 & 0.466 & 0.481 & 4.52 & -- / 5.12 & \\
+stock, down & 1.527 & 0.632 & 0.409 & 6.35 & -- / 2.88 & \\
+fitted, up & 0.103 & 0.045 & 0.036 & 0.61 & 5.15 / 5.12 & 0.0012 \\
+fitted, down & 0.159 & 0.136 & 0.091 & 0.49 & 2.88 / 2.88 & 0.0038 \\
+\bottomrule
+\end{tabular}\end{center}
+{\footnotesize RMS (eV) of EHT$-$DFT inside the window, within 2 and 1~eV of $E_F$; $N_e$: electrons in the channel, EHT states below $E_F$ on the
+$\Gamma$ mesh $11^3$ (no smearing) vs.\ DFT (8 valence electrons and $m=2.24\,\mu_B$).}
+
+The stock table puts the $4s$ band bottom 4~eV too high; after the fit the $s$ band, the $d$ manifold and the Fermi-level
+crossings follow PBE, and the model moment is $5.15-2.88=2.27\,\mu_B$ (PBE 2.24). The fitted $3d$ level of the up channel
+is 1.41~eV below that of the down channel (exchange splitting), while the $s$ and $p$ levels change by less than 0.3~eV.
+The remaining errors are at the bottom of the $s$ band (up to 0.6~eV) and in the down-channel $d$ bands about 2.5~eV above
+$E_F$. \cmd{fitting/metal-cmaes-10k/spin\_polarized/huckel-SP.dat} holds the joined Hamiltonian; its eigenvalues at
+$\Gamma$ and H are those of the two channel fits.
 
 \paragraph{Export to WanTiBEXOS.} The tool already writes the Hamiltonian for WanTiBEXOS: \cmd{huckel-NP.dat} (spinless),
 \cmd{huckel-SOC.dat} (spin--orbit) and \cmd{huckel-SP.dat} (spin-polarized), each with its \cmd{basis\_set-*} file, read with
@@ -857,21 +911,22 @@ the two shifted channels); the two spin-polarized band runs found locally were i
 
 % ================================================================ 6e
 \section{Validation: best fits}\label{sec:validation}
-The best fit of each material of \cmd{validation/} (section~\ref{sec:strategies}) and the four spin--orbit fits
-(section~\ref{sec:soc}), as \cmd{bands\_full\_comparison} figures: all DFT (or Wannier90) bands in blue and all EHT bands
+The best fit of each material of \cmd{validation/} (section~\ref{sec:strategies}), the four spin--orbit fits
+(section~\ref{sec:soc}) and the two spin channels of the metal Fe (section~\ref{sec:spin}), as \cmd{bands\_full\_comparison} figures: all DFT (or Wannier90) bands in blue and all EHT bands
 in red dashed, each relative to its midgap; the footers give RMS, MAE, largest error and gap of the fitted frontier bands
 and the RMS of the window objective. Every folder holds the parameters (\cmd{parameters\_huckel.dat}) and the WanTiBEXOS
 files (\cmd{huckel-NP.dat} or \cmd{huckel-SOC.dat}, \cmd{basis\_set-*}).
 
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/aims_MoS2_monolayer_hse06_soc.jpg}\\[-1pt]{\footnotesize\raggedright MoS$_2$ monolayer --- FHI-aims HSE06. Best protocol: window, GA + NM (\cmd{validation/aims/MoS2\_monolayer\_hse06\_soc/fitting/window-ga}); RMS within 2~eV of $E_F$ 0.118~eV, gap error $+0.054$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/aims_MoS2_monolayer_pbe.jpg}\\[-1pt]{\footnotesize\raggedright MoS$_2$ monolayer --- FHI-aims PBE. Best protocol: targeted refinement (\cmd{validation/aims/MoS2\_monolayer\_pbe/fitting/refine-bands}); RMS within 2~eV of $E_F$ 0.180~eV, gap error $-0.056$~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/qe_SiC_zincblende_pbe.jpg}\\[-1pt]{\footnotesize\raggedright 3C-SiC --- QE PBE. Best protocol: window, GA + NM, ext.\ basis (\cmd{validation/qe/SiC\_zincblende\_pbe/fitting/window-ga-basis}); RMS within 2~eV of $E_F$ 0.266~eV, gap error $+0.190$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/qe_Si_diamond_lda.jpg}\\[-1pt]{\footnotesize\raggedright Si diamond --- QE LDA. Best protocol: window, GA + NM, ext.\ basis (\cmd{validation/qe/Si\_diamond\_lda/fitting/window-ga-basis}); RMS within 2~eV of $E_F$ 0.220~eV, gap error $+0.021$~eV.\par}\end{minipage}\par\medskip
-\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/qe_Si_wurtzite_lda.jpg}\\[-1pt]{\footnotesize\raggedright Si wurtzite --- QE LDA. Best protocol: window, GA + NM, ext.\ basis (\cmd{validation/qe/Si\_wurtzite\_lda/fitting/window-ga-basis}); RMS within 2~eV of $E_F$ 0.225~eV, gap error $+0.002$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/siesta_Al2O2_bilayer_test.jpg}\\[-1pt]{\footnotesize\raggedright Al$_2$O$_2$ bilayer --- SIESTA. Best protocol: window, CMA-ES + NM (\cmd{validation/siesta/Al2O2\_bilayer\_test/fitting/window-cmaes}); RMS within 2~eV of $E_F$ 0.092~eV, gap error $+0.028$~eV.\par}\end{minipage}\par\medskip
+\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/qe_Si_wurtzite_lda.jpg}\\[-1pt]{\footnotesize\raggedright Si wurtzite --- QE LDA. Best protocol: window, GA + NM, ext.\ basis (\cmd{validation/qe/Si\_wurtzite\_lda/fitting/window-ga-basis}); RMS within 2~eV of $E_F$ 0.225~eV, gap error $+0.002$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/siesta_Al2O2_bilayer_test.jpg}\\[-1pt]{\footnotesize\raggedright Al$_2$O$_2$ bilayer --- SIESTA. Best protocol: VB1 + CB1--3 only, CMA-ES + NM, basis + Al $3d$ (\cmd{validation/siesta/Al2O2\_bilayer\_test/fitting/v1c3-cmaes-basis-8k}); RMS within 2~eV of $E_F$ 0.075~eV, gap error $-0.006$~eV; per band VB1 0.06, CB1 0.16, CB2 0.30, CB3 0.36~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/siesta_CNR_nanoribbon_1d_pbe.jpg}\\[-1pt]{\footnotesize\raggedright C$_{52}$H$_{16}$ nanoribbon --- SIESTA PBE. Best protocol: window, GA + NM, ext.\ basis (\cmd{validation/siesta/CNR\_nanoribbon\_1d\_pbe/fitting/window-ga-basis}); RMS within 2~eV of $E_F$ 0.119~eV, gap error $+0.035$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_In2S2_monolayer_pbe.jpg}\\[-1pt]{\footnotesize\raggedright In$_2$S$_2$ monolayer --- VASP PBE. Best protocol: targeted refinement (VB1--3, CB1--2) (\cmd{validation/vasp/In2S2\_monolayer\_pbe/fitting/refine-bands3}); RMS within 2~eV of $E_F$ 0.193~eV, gap error $+0.106$~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_TiBr2_monolayer_pbe.jpg}\\[-1pt]{\footnotesize\raggedright TiBr$_2$ monolayer --- VASP PBE. Best protocol: window, GA + NM (\cmd{validation/vasp/TiBr2\_monolayer\_pbe/fitting/window-ga}); RMS within 2~eV of $E_F$ 0.208~eV, gap error $-0.059$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_ZnI2_monolayer_pbe.jpg}\\[-1pt]{\footnotesize\raggedright ZnI$_2$ monolayer --- VASP PBE. Best protocol: targeted refinement (\cmd{validation/vasp/ZnI2\_monolayer\_pbe/fitting/refine-bands}); RMS within 2~eV of $E_F$ 0.094~eV, gap error $+0.057$~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/wannier90_GaN_monolayer_qe_pbe.jpg}\\[-1pt]{\footnotesize\raggedright GaN monolayer --- Wannier90 (QE PBE). Best protocol: targeted refinement (\cmd{validation/wannier90/GaN\_monolayer\_qe\_pbe/fitting/refine-bands}); RMS within 2~eV of $E_F$ 0.245~eV, gap error $+0.005$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/wannier90_Si_diamond_vasp_pbe.jpg}\\[-1pt]{\footnotesize\raggedright Si diamond --- Wannier90 (VASP PBE). Best protocol: targeted refinement (\cmd{validation/wannier90/Si\_diamond\_vasp\_pbe/fitting/refine-bands}); RMS within 2~eV of $E_F$ 0.192~eV, gap error $+0.013$~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/wannier90_TiBr2_monolayer_vasp_pbe.jpg}\\[-1pt]{\footnotesize\raggedright TiBr$_2$ monolayer --- Wannier90 (VASP PBE). Best protocol: window, CMA-ES + NM (\cmd{validation/wannier90/TiBr2\_monolayer\_vasp\_pbe/fitting/window-cmaes}); RMS within 2~eV of $E_F$ 0.170~eV, gap error $+0.038$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/aims_MoS2_monolayer_hse06_soc_soc.jpg}\\[-1pt]{\footnotesize\raggedright MoS$_2$, FHI-aims HSE06 + SOC: EHT + on-site $\lambda\,\mathbf L\cdot\mathbf S$ (Mo-d 0.063, S-p 0.198~eV) (\cmd{validation/aims/MoS2\_monolayer\_hse06\_soc/fitting/soc-from-window-ga}); RMS within 2~eV of $E_F$ 0.109~eV, gap error $+0.083$~eV.\par}\end{minipage}\par\medskip
 \noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/siesta_MoS2_monolayer_pbe_soc_soc.jpg}\\[-1pt]{\footnotesize\raggedright MoS$_2$, SIESTA PBE + SOC: EHT + on-site $\lambda\,\mathbf L\cdot\mathbf S$ (Mo-d 0.054, S-p 0.025~eV) (\cmd{validation/siesta/MoS2\_monolayer\_pbe\_soc/fitting/soc-from-aims-window-cmaes}); RMS within 2~eV of $E_F$ 0.198~eV, gap error $+0.020$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_ZnI2_monolayer_pbe_soc_soc.jpg}\\[-1pt]{\footnotesize\raggedright ZnI$_2$, VASP PBE + SOC: EHT + on-site $\lambda\,\mathbf L\cdot\mathbf S$ (I-p 0.613~eV) (\cmd{validation/vasp/ZnI2\_monolayer\_pbe\_soc/fitting/soc-from-window-ga-basis}); RMS within 2~eV of $E_F$ 0.176~eV, gap error $+0.135$~eV.\par}\end{minipage}\par\medskip
-\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_In2S2_monolayer_pbe_soc_soc.jpg}\\[-1pt]{\footnotesize\raggedright In$_2$S$_2$, VASP PBE + SOC: EHT + on-site $\lambda\,\mathbf L\cdot\mathbf S$ (In-p 0.092, S-p 0.241~eV) (\cmd{validation/vasp/In2S2\_monolayer\_pbe\_soc/fitting/soc-from-window-cmaes}); RMS within 2~eV of $E_F$ 0.160~eV, gap error $+0.082$~eV.\par}\end{minipage}\par\medskip
+\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_In2S2_monolayer_pbe_soc_soc.jpg}\\[-1pt]{\footnotesize\raggedright In$_2$S$_2$, VASP PBE + SOC: EHT + on-site $\lambda\,\mathbf L\cdot\mathbf S$ (In-p 0.092, S-p 0.241~eV) (\cmd{validation/vasp/In2S2\_monolayer\_pbe\_soc/fitting/soc-from-window-cmaes}); RMS within 2~eV of $E_F$ 0.160~eV, gap error $+0.082$~eV.\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_up.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, VASP PBE, spin up (metal, bands relative to $E_F$; grey band = fit window) (\cmd{validation/vasp/Fe\_bcc\_pbe\_spin/fitting/metal-cmaes-10k/spin\_up}); RMS in the window 0.103~eV, within 1~eV of $E_F$ 0.036~eV.\par}\end{minipage}\par\medskip
+\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_down.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, VASP PBE, spin down (\cmd{validation/vasp/Fe\_bcc\_pbe\_spin/fitting/metal-cmaes-10k/spin\_down}); RMS in the window 0.159~eV, within 1~eV of $E_F$ 0.091~eV; joined with spin up in \cmd{spin\_polarized/huckel-SP.dat}.\par}\end{minipage}\par\medskip
 
 % ================================================================ 7
 \section{Frozen transfer}

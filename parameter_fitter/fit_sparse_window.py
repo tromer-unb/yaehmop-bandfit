@@ -17,7 +17,7 @@ import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
 from structure_io import read_structure,resolved_structure_format
 from dft_bands import load_reference,eht_reference
-from band_objective import WindowSettings,window_error,extend_basis,parse_basis_add,OBJECTIVES
+from band_objective import WindowSettings,window_error,metal_error,extend_basis,parse_basis_add,OBJECTIVES
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -28,7 +28,7 @@ from yaehmop_generic import (resolve_yaehmop_assets,parse_parameter_table,
  subset_for_elements,orbital_count,valence_electrons,
  BandPath,normalized_path_coordinate,write_parameter_file,
  write_periodic_input_generic,run_bind,parse_band,
- DEFAULT_OVERLAP_RADIUS,overlap_images_for)
+ DEFAULT_OVERLAP_RADIUS,overlap_images_for,gamma_mesh,read_matrix_dump)
 from p3_objectives import bounded_nelder_mead,hooke_jeeves
 from simulated_annealing import simulated_annealing
 from hybrid_sa_nm import hybrid_sa_nelder_mead
@@ -102,6 +102,8 @@ def parse_dft_sample(e,root,defaults,shared,cif,ref_path,sfmt,atoms):
     params={k:defaults[k] for k in set(syms)}
     norb=orbital_count(params,syms)
     nelec=valence_electrons(params,syms)
+    if e.get("metallic",shared.get("metallic")):
+        return parse_metal_sample(e,defaults,shared,cif,ref_path,sfmt,atoms,syms,norb,nelec)
     if nelec%2:raise ValueError("spinless YAeHMOP needs even nelec")
     nocc=nelec//2
     p=int(e.get("n_pairs",shared.get("n_pairs",2)))
@@ -130,6 +132,38 @@ def parse_dft_sample(e,root,defaults,shared,cif,ref_path,sfmt,atoms):
       periodic_dim=dim,overlap_images=images,structure_format=sfmt,
       png_hash=hashlib.sha256(ref_path.read_bytes()).hexdigest(),
       cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
+
+def parse_metal_sample(e,defaults,shared,cif,ref_path,sfmt,atoms,syms,norb,nelec):
+    """Metallic DFT reference: all bands relative to the DFT Fermi level, paired from the
+    bottom with the EHT bands (objective 'metal')."""
+    dim=int(e.get("point_dim",3))
+    radius=int(e.get("overlap_radius",shared.get("overlap_radius",DEFAULT_OVERLAP_RADIUS)))
+    n=int(e.get("points_per_line",shared.get("points_per_line",20)))
+    ref=load_reference(ref_path,atoms)
+    if ref.fermi is None:raise ValueError(e["name"]+": metallic reference without Fermi level")
+    er=eht_reference(ref,n,dim)
+    T=er.energies-ref.fermi
+    nb=min(T.shape[1],norb)
+    return dict(name=e["name"],cif=cif,png=ref_path,symbols=syms,
+      elements=list(dict.fromkeys(syms)),norb=norb,nelec=nelec,nocc=max(1,nelec//2),metal=True,
+      path=BandPath(tuple(er.labels),er.nodes,n),kx=er.x,kmask=er.mask,
+      target=T[:,:nb],target_all=T,dft_nocc=ref.nocc,dft_fermi=float(ref.fermi),ticks=er.ticks,
+      n_pairs=int(e.get("n_pairs",shared.get("n_pairs",1))),gap=0.0,weight=float(e.get("weight",1.)),
+      periodic_dim=dim,overlap_images=overlap_images_for(dim,radius),structure_format=sfmt,
+      png_hash=hashlib.sha256(ref_path.read_bytes()).hexdigest(),
+      cif_hash=hashlib.sha256(cif.read_bytes()).hexdigest())
+
+def metal_scores(bands,s,wset):
+    """Metrics of the 'metal' objective and the shifted EHT bands (relative to E_F)."""
+    E=bands[s["kmask"]]
+    if E.shape!=(len(s["kx"]),s["norb"]):raise ValueError("physical EHT spectrum shape mismatch")
+    m=metal_error(s["target_all"],E,s["kx"],[x for x,_ in s["ticks"]],wset)
+    nb=s["target"].shape[1];sel=E[:,:nb]+m["shift_eV"]
+    d=sel-s["target"];inside=(s["target"]>=wset.window_min)&(s["target"]<=wset.window_max)
+    m.update(selected_rmse_eV=float(np.sqrt(np.mean(d[inside]**2))),gap_error_eV=0.0,
+             two_rmse_eV=m["rms_within_1eV_of_EF_eV"],four_rmse_eV=m["rms_within_2eV_of_EF_eV"],
+             nocc=s["nocc"],norb=s["norb"],metallic=True)
+    return m,sel,E+m["shift_eV"]
 
 def write_sample_input(s,inp,k):
     """Native periodic input for one sample, honouring its dimensionality."""
@@ -211,8 +245,14 @@ class Fitter:
                 self.bounds[i]=(self.stock[i]-5.,self.stock[i]+5.)
         self.names=[f"{el}_{orb}_{key}".strip("_") for el,orb,key in self.specs]
         self.pairs=int(config.get("n_pairs",2))
+        if any(s.get("metal") for s in self.train) and self.objective_name!="metal":
+            raise ValueError("a metallic reference needs objective 'metal'")
         if any(s["n_pairs"]!=self.pairs for s in self.train):
             raise ValueError("All train systems must use same n_pairs")
+        # H(R), S(R) must stay exportable: a new best candidate is accepted only if S(k) is
+        # positive definite (smallest eigenvalue >= overlap_min_eig) on the export mesh
+        self.overlap_min_eig=float(config.get("overlap_min_eig",1e-3))
+        self.best_checked=float("inf");self.overlap_rejected=0;self.overlap_checks=0
         self.gap_w=float(config.get("gap_weight",.35))
         self.reg_w=float(config.get("reg_weight",.04))
         self.calls=0
@@ -226,6 +266,30 @@ class Fitter:
         for tmp in w.glob(tag+"*"):
             if tmp.is_file():tmp.unlink()
         return bands
+    @staticmethod
+    def overlap_kpoints(s,radius):
+        """Every k point where the export evaluates S(k): the Gamma mesh and the band path."""
+        nodes=np.asarray(s["path"].points,float);n=int(s["path"].points_per_line);ks=[]
+        for a,b in zip(nodes[:-1],nodes[1:]):
+            ks+=[a+(b-a)*i/n for i in range(n)]
+        ks.append(nodes[-1])
+        return np.vstack([gamma_mesh(s["periodic_dim"],radius),np.array(ks)])
+    def overlap_min(self,s,params,k):
+        """Smallest eigenvalue of S(k) at the k points of the H(R),S(R) export (Gamma mesh + band path)."""
+        w=self.work/s["name"];w.mkdir(exist_ok=True)
+        tag=f"ovl_{self.calls:07d}";native=w/(tag+".parms");inp=w/(tag+".bind")
+        write_parameter_file(native,{a:params[a] for a in s["elements"]})
+        radius=int(max(s["overlap_images"]))
+        write_periodic_input_generic(s["cif"],inp,None,k,True,s["nelec"],overlap_images=s["overlap_images"],
+            periodic_dim=s["periodic_dim"],structure_format=s.get("structure_format"),
+            kpoints=self.overlap_kpoints(s,radius))
+        try:
+            run_bind(self.bind,inp,native,w/(tag+".log"))
+            S=read_matrix_dump(str(inp)+".OV")
+            return float(min(np.linalg.eigvalsh(Sk).min() for Sk in S))
+        finally:
+            for tmp in w.glob(tag+"*"):
+                if tmp.is_file():tmp.unlink()
     def objective(self,x,eid,stage):
         self.calls+=1
         try:
@@ -235,6 +299,12 @@ class Fitter:
             line=dict(K=float(K))
             for s in self.train:
                 full=self.run(s,params,K,f"trial_{self.calls:07d}")
+                if s.get("metal"):
+                    wm,_,_=metal_scores(full,s,self.wset)
+                    values.append(wm["total"]);weights.append(s["weight"])
+                    line[s["name"]+"_window_rms_eV"]=wm["window_rms_eV"]
+                    line[s["name"]+"_rms_2eV_EF"]=wm["rms_within_2eV_of_EF_eV"]
+                    continue
                 m,_=scores(full,s)
                 if self.objective_name=="window":
                     wm=self.window_metrics(full,s)
@@ -250,6 +320,15 @@ class Fitter:
             reg=float(np.sqrt(np.mean(((np.asarray(x)-self.stock)/self.scales)**2)))
             cost=float(np.average(values,weights=weights)+self.reg_w*reg)
             line["regularization"]=reg
+            if self.overlap_min_eig>0 and cost<self.best_checked:
+                self.overlap_checks+=1
+                smin=min(self.overlap_min(s,params,K) for s in self.train)
+                line["overlap_min_eig"]=smin
+                if smin<self.overlap_min_eig:
+                    self.overlap_rejected+=1
+                    return 1e4,{"error":f"overlap S(k) not positive definite enough (min eigenvalue {smin:.2e}): "
+                                         "H(R), S(R) could not be exported"}
+                self.best_checked=cost
             return cost,line
         except Exception as exc:
             return 1e4,{"error":str(exc)}
@@ -272,6 +351,18 @@ class Fitter:
         result={}
         for s in specs:
             full=self.run(s,params,K,"final_eigen")
+            if s.get("metal"):
+                met,b,Eall=metal_scores(full,s,self.wset)
+                met["window"]=dict(met)
+                met["role"]="train" if s["name"] in [t["name"] for t in self.train] else "test"
+                result[s["name"]]=met
+                np.savez_compressed(self.out/(s["name"]+"_bands.npz"),k=s["kx"],reference=s["target"],
+                    YAeHMOP=b,reference_all=s["target_all"],YAeHMOP_all=Eall,
+                    tick_x=np.array([x for x,_ in s["ticks"]],float),
+                    tick_labels=np.array([l for _,l in s["ticks"]]),metallic=True,
+                    dft_fermi=s["dft_fermi"],eht_fermi=met["eht_fermi_eV"],
+                    window=np.array([self.wset.window_min,self.wset.window_max]))
+                continue
             met,b=scores(full,s)
             if s.get("target_all") is not None:
                 met["window"]=self.window_metrics(full,s)
@@ -446,8 +537,10 @@ def main():
                for s in f.train},
       structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
                          for s in f.train},
-      objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name=="window" else None,
-      basis_added=f.basis_add or None,start_from=str(f.start_from) if f.start_from else None)
+      objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name in ("window","metal") else None,
+      basis_added=f.basis_add or None,start_from=str(f.start_from) if f.start_from else None,
+      overlap_check=dict(min_eigenvalue_required=f.overlap_min_eig,checks=f.overlap_checks,
+                         candidates_rejected=f.overlap_rejected))
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")
     # Export directly loadable atomic parameters for original YAeHMOP.
     parameters,K=apply_x(f.stockparams,f.specs,x)

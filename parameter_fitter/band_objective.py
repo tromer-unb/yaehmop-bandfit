@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 import numpy as np
 
-OBJECTIVES = ("frontier", "window")
+OBJECTIVES = ("frontier", "window", "metal")
 
 
 @dataclass
@@ -223,6 +223,92 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
                 rms_named_bands_eV=rbands, rms_slope_eV=rslope, mass_log_error=rmass,
                 rms_v1v3_c1c3_eV=float(np.sqrt(np.mean(D[:, max(0, ov - 3):ov + 3] ** 2))),
                 **per_band,
+                **{f"term_{k}": float(v) for k, v in terms.items()})
+
+
+def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
+    """Objective 'metal': no gap, so no VBM/CBM alignment.
+
+    ref (nk, nb_dft): DFT energies relative to the Fermi level; eht (nk, norb): absolute
+    YAeHMOP energies on the same k points. Bands are paired from the bottom (DFT band j
+    <-> EHT band j). EHT has no absolute energy scale, so it is shifted by the constant
+    c that minimizes the g-weighted RMS (closed form: the weighted mean of ref - eht);
+    E_F of the model is then -c on the EHT scale. The window [window_min, window_max]
+    is relative to E_F; g(E) = far_weight + (1-far_weight) exp(-|E|/energy_scale).
+    Terms: weighted RMS, frontier (sharper decay, frontier_scale), high-symmetry points,
+    local extrema (energy and position), named bands b1, b2... via band_weights
+    ('v1:5' = lowest band; for metals v<j> counts from the bottom) and slope.
+    """
+    nb = min(ref.shape[1], eht.shape[1])
+    A = np.asarray(ref[:, :nb], float)
+    B0 = np.asarray(eht[:, :nb], float)
+    inside = (A >= s.window_min) & (A <= s.window_max)
+    if not inside.any():
+        raise ValueError("no DFT band inside the metal window")
+    G = (s.far_weight + (1 - s.far_weight) * np.exp(-np.abs(A) / max(s.energy_scale, 1e-6))) * inside
+    c = float(np.sum(G * (A - B0)) / np.sum(G))
+    B = B0 + c
+    D = B - A
+
+    def wrms(d, w):
+        return float(np.sqrt(np.sum(w * d ** 2) / np.sum(w))) if np.sum(w) > 0 else 0.0
+    rw = wrms(D, G)
+    wf = np.exp(-np.abs(A) / max(s.frontier_scale, 1e-6)) * inside
+    rf = wrms(D, wf)
+    xs = np.asarray(x, float)
+    segs = _segments(xs, nodes_x)
+    hs_idx = sorted({int(np.argmin(np.abs(xs - t))) for t in nodes_x})
+    hs = [(D[i, j], G[i, j]) for i in hs_idx for j in range(nb) if inside[i, j]]
+    rhs = wrms(np.array([h[0] for h in hs]), np.array([h[1] for h in hs])) if hs else 0.0
+    ext_e, ext_p, ext_w = [], [], []
+    for j in range(nb):
+        cand = _local_extrema(B[:, j], segs)
+        for i, kind in _local_extrema(A[:, j], segs):
+            if not inside[i, j]:
+                continue
+            seg = next((sg for sg in segs if sg[0] <= i <= sg[1]), (0, len(xs) - 1))
+            same = [ii for ii, kk in cand if kk == kind and seg[0] <= ii <= seg[1]]
+            if same:
+                ii = min(same, key=lambda q: abs(xs[q] - xs[i]))
+                ext_e.append(B[ii, j] - A[i, j])
+                ext_p.append(abs(xs[ii] - xs[i]) / max(xs[seg[1]] - xs[seg[0]], 1e-9))
+            else:
+                ext_e.append(D[i, j]); ext_p.append(0.5)
+            ext_w.append(G[i, j])
+    rext = wrms(np.array(ext_e), np.array(ext_w)) if ext_e else 0.0
+    rpos = wrms(np.array(ext_p), np.array(ext_w)) if ext_p else 0.0
+    col_w = np.ones(nb); per_band = {}; num = den = 0.0
+    for (kind, k), w in parse_band_weights(s.band_weights).items():
+        j = k - 1
+        if 0 <= j < nb:
+            col_w[j] = max(col_w[j], w)
+            m = inside[:, j]
+            r = float(np.sqrt(np.mean(D[m, j] ** 2))) if m.any() else 0.0
+            per_band[f"rms_band{k}_eV"] = r
+            num += w * r ** 2; den += w
+    rbands = float(np.sqrt(num / den)) if den else 0.0
+    same = np.diff(xs) > 1e-12
+    Wd = 0.5 * (G[1:] + G[:-1]) * col_w[None, :] * same[:, None]
+    rslope = wrms(np.diff(B, axis=0) - np.diff(A, axis=0), Wd)
+    terms = {
+        "weighted": s.w_valence * rw ** 2,
+        "frontier": s.w_frontier * rf ** 2,
+        "high_symmetry": s.w_high_symmetry * rhs ** 2,
+        "extrema": s.w_extrema * rext ** 2 + s.w_position * rpos ** 2,
+        "bands": s.w_bands * rbands ** 2,
+        "slope": s.w_slope * rslope ** 2,
+    }
+    near = inside & (np.abs(A) <= 2.0)
+    near1 = inside & (np.abs(A) <= 1.0)
+    return dict(total=float(np.sqrt(sum(terms.values()))), shift_eV=c, eht_fermi_eV=-c,
+                window_rms_eV=float(np.sqrt(np.mean(D[inside] ** 2))),
+                rms_within_2eV_of_EF_eV=float(np.sqrt(np.mean(D[near] ** 2))) if near.any() else 0.0,
+                rms_within_1eV_of_EF_eV=float(np.sqrt(np.mean(D[near1] ** 2))) if near1.any() else 0.0,
+                max_abs_in_window_eV=float(np.abs(D[inside]).max()),
+                fermi_weighted_rms_eV=rf, g_weighted_rms_eV=rw,
+                rms_high_symmetry_eV=rhs, rms_extrema_eV=rext, rms_named_bands_eV=rbands,
+                rms_slope_eV=rslope, n_bands_compared=int(nb),
+                n_bands_in_window=int(inside.any(axis=0).sum()), **per_band,
                 **{f"term_{k}": float(v) for k, v in terms.items()})
 
 

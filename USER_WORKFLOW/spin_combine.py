@@ -23,7 +23,7 @@ parameters_huckel_up.dat / _down.dat, orbitals.dat, POSCAR, fit_summary.json.
 """
 from __future__ import annotations
 from pathlib import Path
-import argparse, gzip, json, shutil
+import argparse, gzip, json, os, shutil
 import numpy as np
 
 
@@ -61,11 +61,13 @@ def main():
         dr = s.get("dft_reference") or {}
         if dr.get("spin_channel") not in (None, tag):
             raise SystemExit(f"{d}: fitted spin channel is {dr.get('spin_channel')}, not {tag}")
-        if dr.get("midgap_eV") is None or dr.get("fermi_eV") is None:
+        # zero of huckel-NP.dat: the DFT midgap (gapped channel) or the DFT Fermi level (metal)
+        zero = dr.get("energy_zero_eV", dr.get("midgap_eV"))
+        if zero is None or dr.get("fermi_eV") is None:
             raise SystemExit(f"{d}: fit_summary.json lacks the DFT midgap / Fermi level (refit with this version)")
         cell, n, blocks = read_tb(d / "huckel-NP.dat")
         chans[tag] = dict(dir=d, summary=s, cell=cell, n=n, blocks=blocks,
-                          shift=float(dr["midgap_eV"]) - float(dr["fermi_eV"]))
+                          shift=float(zero) - float(dr["fermi_eV"]))
     up, dn = chans["up"], chans["down"]
     if up["n"] != dn["n"]:
         raise SystemExit(f"Different basis sizes: up {up['n']}, down {dn['n']} orbitals (use the same basis)")
@@ -98,11 +100,11 @@ def main():
     for fname in ("orbitals.dat", "POSCAR"):
         if (up["dir"] / fname).is_file():
             shutil.copy(up["dir"] / fname, out / fname)
-    summary = dict(spin_up_fit=str(up["dir"].resolve()), spin_down_fit=str(dn["dir"].resolve()),
+    summary = dict(spin_up_fit=os.path.relpath(up["dir"].resolve(), out), spin_down_fit=os.path.relpath(dn["dir"].resolve(), out),
                    n_orbitals_per_spin=n, n_cells=len(cells),
                    shift_up_eV=up["shift"], shift_down_eV=dn["shift"],
                    K_EHT_up=up["summary"].get("K_EHT"), K_EHT_down=dn["summary"].get("K_EHT"),
-                   energy_zero="DFT Fermi level; each channel shifted by (DFT midgap of the channel - E_F)",
+                   energy_zero="DFT Fermi level; each channel shifted by (DFT midgap of the channel - E_F); 0 for a metal (already at E_F)",
                    spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero")
     (out / "fit_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (out / "README.txt").write_text(

@@ -167,7 +167,9 @@
       "basis_set-NP",
       "orbitals.dat",
       "hamiltonian_overlap_k.dat"
-    ]
+    ],
+    "overlap_min_eigenvalue": 0.3308346837474304,
+    "warning": null
   },
   "protocol": "window-cmaes"
 }

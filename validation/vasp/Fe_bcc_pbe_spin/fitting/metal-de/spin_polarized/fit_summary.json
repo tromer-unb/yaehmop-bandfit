@@ -1,0 +1,12 @@
+{
+  "spin_up_fit": "../spin_up",
+  "spin_down_fit": "../spin_down",
+  "n_orbitals_per_spin": 9,
+  "n_cells": 929,
+  "shift_up_eV": 0.0,
+  "shift_down_eV": 0.0,
+  "K_EHT_up": 1.7541328464180193,
+  "K_EHT_down": 1.7559224354826477,
+  "energy_zero": "DFT Fermi level; each channel shifted by (DFT midgap of the channel - E_F); 0 for a metal (already at E_F)",
+  "spinor_basis": "2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero"
+}
