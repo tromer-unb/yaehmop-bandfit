@@ -226,6 +226,75 @@ Inspecting images, preparing references, plotting saved results, \cmd{quick.py} 
 evaluation and recomputation of bands run it. GitHub Actions run only the light tests.
 
 % ================================================================ 3
+\section{Graphical interface (\cmd{band\_fit\_gui.py})}\label{sec:gui}
+\cmd{band\_fit\_gui.py}, in the repository root, is a desktop program (Qt, no web browser) that covers every
+command of the tool:
+\begin{lstlisting}[style=sh]
+conda activate yaehmop-bandfit
+python band_fit_gui.py
+\end{lstlisting}
+It needs PySide6 (\cmd{PySide6-Essentials}, installed by \cmd{environment.yml} and \cmd{install.sh}; otherwise
+\cmd{pip install PySide6-Essentials}). The window has a list of tasks on the left, the form of the chosen task in the
+middle and the \emph{Runs} panel on the right; the BandFit logo is at the top of the task list.
+
+\paragraph{Tasks.}
+\begin{itemize}
+  \item \textbf{Fit to image}: crystal structure (CIF, POSCAR, QE, SIESTA, FHI-aims) and a picture (PNG, JPEG, TIFF,
+  WebP) or CSV of the bands, with a thumbnail; the energy range, reading mode, plot box and colors; the k path
+  (points, labels, dimension, or a \emph{standard path}: 2D hexagonal, square, rectangular; 3D fcc, bcc, simple
+  cubic, hexagonal; 1D). \emph{Preview} reads the picture without fitting and shows \cmd{extraction\_preview.png};
+  \emph{Run fit} starts the fit. At the end the fitted EHT bands are also drawn over the user's own picture
+  (\cmd{bands\_on\_original.png}, black dashed with a white halo, readable over any colors; figure~\ref{fig:gui-image}).
+  \item \textbf{Fit to DFT}: the folder of a band calculation; the package is detected from its files and a VASP
+  spin-polarized run is flagged. \emph{Preview} shows the DFT bands; if they cross the Fermi level the interface
+  offers the \cmd{metal} objective (section~\ref{sec:spin}). \emph{Fit both spins} fits the spin-up and spin-down
+  channels at the same time and then runs \cmd{spin\_combine.py} (\cmd{huckel-SP.dat}).
+  \item \textbf{Spin-orbit} (\cmd{soc\_fit.py}), \textbf{Spin combine} (\cmd{spin\_combine.py}), \textbf{Frozen
+  transfer}, \textbf{Family fit}, \textbf{Compare strategies} and \textbf{Image tools} (\cmd{prepare\_band\_png},
+  \cmd{inspect\_png}, \cmd{digitize\_bands}, \cmd{strategy\_advisor}).
+\end{itemize}
+
+\paragraph{Every option.} The forms are built at start-up from the commands' own \cmd{argparse} definitions,
+read in a separate process, so every command-line option is there (the less used ones in a collapsible
+\emph{All command-line options} panel, with the help text as tooltip) and new options appear without changing the
+interface. Free-text fields with typical values (budget, \cmd{basis\_add}, energy window, \cmd{band\_weights},
+colors, \cmd{soc\_shells}, overlap radius, \ldots) have a drop-down list of them and stay editable; in the DFT task the
+\cmd{dft\_file} list holds the band files found in the chosen folder. The two fit tasks also have a form for the INI file (\cmd{[reference]}, \cmd{[band\_path]},
+\cmd{[fit]}, \cmd{[objective]}), with \emph{Load INI}, \emph{Save INI} and \emph{Show INI}; command-line options
+override the INI, as in the terminal. \emph{Show command} prints the equivalent command line.
+
+\paragraph{Runs.} Each run is a separate process of the command-line tool, so several fits run at the same time
+(one CPU core each). Every run writes its INI (\cmd{settings.ini}) and outputs to
+\cmd{<output folder>/<run name>/} (fit outputs in its \cmd{fitting/}). The table shows status, time, YAeHMOP calls
+and best loss; below it, the \emph{Log}, the \emph{Progress} plot (loss of every call and best so far, read live from
+\cmd{fit/progress.csv}, figure~\ref{fig:gui-progress}) and the \emph{Results}: every figure of the run and the main
+metrics of \cmd{fit\_summary.json} (RMS, gap error, $K$, smallest eigenvalue of $S$, electrons per spin channel for
+metals; figure~\ref{fig:gui-results}). \emph{Stop} ends a run, \emph{Open folder} opens its folder, \emph{Open
+results} shows an existing \cmd{fitting/} folder. When a fit ends, a window opens with the comparison against the
+original data (figure~\ref{fig:gui-compare}): the bands on the original picture (image references), all DFT and
+EHT bands (DFT references), the fitted bands, and the main errors; for \emph{Fit both spins} it shows both channels.
+It can be switched off in the window itself. \emph{File $\to$ YAeHMOP executable and parameters} sets
+\cmd{bind} and \cmd{eht\_parms.dat} when the environment variables are not defined.
+
+\begin{figure}[ht]\centering
+\includegraphics[width=\textwidth]{gui_figs/gui_image_fit.jpg}
+\caption{Fit to image: structure, band picture with thumbnail and INI form (fields with drop-down lists of typical
+values); on the right the fitted EHT bands drawn over the original picture.}\label{fig:gui-image}
+\end{figure}
+\begin{figure}[ht]\centering
+\includegraphics[width=\textwidth]{gui_figs/gui_progress.jpg}
+\caption{Fit to DFT (SIESTA Al$_2$O$_2$, package detected) with the live loss of the running fit.}\label{fig:gui-progress}
+\end{figure}
+\begin{figure}[ht]\centering
+\includegraphics[width=\textwidth]{gui_figs/gui_dft_results.jpg}
+\caption{Results of the finished fit: full comparison figure and metrics.}\label{fig:gui-results}
+\end{figure}
+\begin{figure}[ht]\centering
+\includegraphics[width=0.8\textwidth]{gui_figs/gui_compare_dialog.jpg}
+\caption{Window opened at the end of a fit: EHT bands on the original picture, fitted bands and errors.}\label{fig:gui-compare}
+\end{figure}
+\clearpage
+
 \section{Inputs}
 
 \subsection{Crystal structure}\label{sec:structure}
@@ -471,6 +540,8 @@ bands\_comparison.png/pdf & fitted bands: reference in blue (solid), EHT in red 
 bands\_comparison.csv & the curves of that figure: \cmd{k, REF\_band\_1..N, EHT\_band\_1..N} \\
 bands\_full\_comparison.* & (DFT references) all DFT and all EHT bands in the \cmd{[reference] emin/emax}
   window, with the same errors; \cmd{.csv} with every band \\
+bands\_on\_original.png & (picture references) the fitted EHT bands drawn over the user's original band picture,
+  mapped with the traced plot box and energy range \\
 huckel-NP.dat & real-space Hamiltonian $H(\mathbf R)$ and overlap $S(\mathbf R)$ in the WanTiBEXOS
   non-orthogonal format (read with \cmd{DFT= S}) \\
 basis\_set-NP & WanTiBEXOS basis file: \cmd{index species x y z l m spin} (positions in \AA) \\

@@ -256,6 +256,13 @@ class Fitter:
         self.gap_w=float(config.get("gap_weight",.35))
         self.reg_w=float(config.get("reg_weight",.04))
         self.calls=0
+        # live progress for monitors (band_fit_gui.py): call, loss, best loss so far
+        self.best_loss=float("inf")
+        self.progress=open(out/"progress.csv","w",buffering=1)
+        self.progress.write("call,loss,best\n")
+    def log_progress(self,cost):
+        self.best_loss=min(self.best_loss,cost)
+        self.progress.write(f"{self.calls},{cost:.6g},{self.best_loss:.6g}\n")
     def run(self,s,params,k,tag):
         w=self.work/s["name"];w.mkdir(exist_ok=True)
         native=w/(tag+".parms");inp=w/(tag+".bind");log=w/(tag+".log")
@@ -326,11 +333,14 @@ class Fitter:
                 line["overlap_min_eig"]=smin
                 if smin<self.overlap_min_eig:
                     self.overlap_rejected+=1
+                    self.log_progress(1e4)
                     return 1e4,{"error":f"overlap S(k) not positive definite enough (min eigenvalue {smin:.2e}): "
                                          "H(R), S(R) could not be exported"}
                 self.best_checked=cost
+            self.log_progress(cost)
             return cost,line
         except Exception as exc:
+            self.log_progress(1e4)
             return 1e4,{"error":str(exc)}
     def window_metrics(self,full,s):
         if s.get("target_all") is None:

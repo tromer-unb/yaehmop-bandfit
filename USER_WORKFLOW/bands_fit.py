@@ -165,6 +165,51 @@ def write_full_comparison(npz,out_dir,*,title,emin=None,emax=None,window_metrics
         w.writerows(np.column_stack((k,R,E)))
     return out_dir/"bands_full_comparison.png"
 
+def write_on_original(qa,npz,out_dir,*,title):
+    """Image references: the fitted EHT bands drawn over the user's own picture.
+
+    The traced picture gives the plot box (pixels) and the energy range; the fit works
+    relative to the midgap of the traced bands, so the EHT bands are shifted back by that
+    midgap (absolute energies of the picture) and mapped to pixels."""
+    from PIL import Image
+    bbox=qa.get("bbox");emin,emax=qa.get("emin"),qa.get("emax")
+    prep=Path(str(qa.get("preview",""))).parent
+    bg=prep/"normalized_source.png"
+    if not bg.is_file():bg=Path(str(qa.get("source","")))
+    curves=prep/"extracted_curves.csv"
+    if not bbox or emin is None or not bg.is_file() or not curves.is_file() or bg.suffix.lower()==".csv":
+        return None
+    d=np.load(npz);k=np.asarray(d["k"],float);E=np.asarray(d["YAeHMOP"],float);R=np.asarray(d["reference"],float)
+    n=E.shape[1];p=n//2
+    rows=list(csv.reader(open(curves)));A=np.array(rows[1:],float);x=A[:,0];C=A[:,1:]
+    if C.shape[1]<n:return None
+    T=np.column_stack([np.interp(k,x,C[:,j]) for j in range(n)])
+    mid=.5*(float(T[:,p-1].max())+float(T[:,p].min()))
+    L,Tp,Rp,B=[float(v) for v in bbox[:4]]
+    px=lambda kk:L+np.asarray(kk)*(Rp-L)
+    py=lambda e:Tp+(float(emax)-np.asarray(e))/(float(emax)-float(emin))*(B-Tp)
+    img=np.asarray(Image.open(bg).convert("RGB"))
+    h,w=img.shape[:2]
+    fig,ax=plt.subplots(figsize=(9.7,9.7*h/w+1.1))
+    ax.imshow(img,extent=(0,w,h,0),interpolation="lanczos")
+    import matplotlib.patheffects as pe
+    halo=[pe.Stroke(linewidth=4.2,foreground="white"),pe.Normal()]
+    for j in range(n):
+        # black dashed with a white halo: readable over any color of the user's picture
+        ax.plot(px(k),py(E[:,j]+mid),color="#111111",lw=2.0,ls="--",path_effects=halo,
+                label="EHT fit (YAeHMOP)" if j==0 else None)
+    ax.set_xlim(0,w);ax.set_ylim(h,0);ax.axis("off")
+    rmse=float(np.sqrt(np.mean((E-R)**2)))
+    ax.set_title(title,fontsize=11)
+    ax.legend(loc="upper right",fontsize=9,framealpha=.9)
+    fig.text(.985,.012,f"EHT bands drawn on the original picture (midgap of the traced bands {mid:+.3f} eV)   "
+             f"RMSE vs traced bands = {rmse:.3f} eV",ha="right",va="bottom",fontsize=8.5,
+             bbox=dict(boxstyle="round,pad=.35",fc="white",ec="0.6"))
+    fig.tight_layout(rect=(0,.04,1,1))
+    out=Path(out_dir)/"bands_on_original.png"
+    fig.savefig(out,dpi=170);plt.close(fig)
+    return out
+
 def write_metal_plots(npz,out_dir,*,title,emin=None,emax=None):
     """Metallic reference: bands relative to E_F (DFT blue, EHT red dashed), two figures:
     bands_comparison (the fitted window) and bands_full_comparison (wider range)."""
@@ -416,6 +461,8 @@ bands_comparison.*         fitted bands: reference blue (solid), EHT red (dashed
                            with RMSE / MAE / max |dE| / gap error in the figure
                            (.png, .pdf; .csv with the curves)
 bands_full_comparison.*    (DFT references) all DFT and EHT bands in a window
+bands_on_original.png      (picture references) the fitted EHT bands drawn over the
+                           original band picture
 huckel-NP.dat              real-space Hamiltonian H(R) and overlap S(R) in the
                            WanTiBEXOS format (as siesta2wtb.py; DFT= S):
                            NP / scissors / Fermi level (0) / 3 lattice vectors [A] /
@@ -468,7 +515,8 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
     else:
         (fdir/"parameters_huckel.txt").write_text(f"K_EHT {float(K):.12g}\n")
     for f in ("bands_comparison.png","bands_comparison.pdf","bands_comparison.csv",
-              "bands_full_comparison.png","bands_full_comparison.pdf","bands_full_comparison.csv"):
+              "bands_full_comparison.png","bands_full_comparison.pdf","bands_full_comparison.csv",
+              "bands_on_original.png"):
         if (Path(outdir)/f).is_file() and Path(outdir).resolve()!=fdir.resolve():
             shutil.copy(Path(outdir)/f,fdir/f)
     for old_file in ("hamiltonian_overlap.npz","tb-NP.dat"):
@@ -748,6 +796,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
         parser.error(str(exc))
     yml={"n_pairs":pairs,"points_per_line":step,"overlap_radius":int(radius),
          "gap_weight":float(fit.get("gap_weight",".35")),"reg_weight":float(fit.get("reg_weight",".04")),
+         "overlap_min_eig":float(fit.get("overlap_min_eig","1e-3")),
          "objective":obj,"objective_settings":obj_set,"basis_add":basis_add,
          "systems":[entry]}
     start=args.start_from or (fit.get("start_from") and csv_path(fit["start_from"],inputs.parent))
@@ -971,6 +1020,7 @@ def main():
          "image_mode":"colored",
          "gap_weight":float(fit.get("gap_weight",".35")),
          "reg_weight":float(fit.get("reg_weight",".04")),
+         "overlap_min_eig":float(fit.get("overlap_min_eig","1e-3")),
          "systems":[{
              "name":name,"role":"train","weight":1.0,
              "structure":str(cif),"structure_format":sfmt,"reference":str(prepared),
@@ -987,6 +1037,11 @@ def main():
                 title=f"{name} — {pairs}VB + {pairs}CB (fit with {2*pairs} bands)")
     if abs(objective_rmse-float(met["selected_rmse_eV"]))>1.e-8:
         raise ValueError("Physical DFT/EHT figure disagrees with optimizer metric")
+    try:
+        on_original=write_on_original(qa,outdir/"fit"/f"{name}_bands.npz",outdir,
+                                      title=f"{name} — EHT fit on the original band picture")
+    except Exception as exc:                  # the extra figure must never break a finished fit
+        on_original=None;print("NOTE no figure on the original picture:",exc,flush=True)
     status={
         "cif":str(cif),"structure_format":sfmt,
         "cif_sha256":hashlib.sha256(cif.read_bytes()).hexdigest(),
@@ -999,6 +1054,7 @@ def main():
         "K_EHT":state["best_x"]["GLOBAL__K"],
         "periodic_dim":dim,"overlap_radius":int(radius),"native_parameters":str(outdir/"fit/param_best_native.dat"),
         "figure":str(outdir/"bands_comparison.png"),
+        "figure_on_original":str(on_original) if on_original else None,
         "note":"Physical YAeHMOP calculations; trained only N=2*n_pairs frontier bands"}
     (outdir/"run_summary.json").write_text(json.dumps(status,indent=2)+"\n")
     xyz=parse_points([y for pt in nodes for y in pt],dim)

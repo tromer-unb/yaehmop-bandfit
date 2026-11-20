@@ -79,6 +79,8 @@ say "checking the Python requirements"
 python -m pip install -q -r "$HERE/requirements.txt"
 python -c "import numpy, scipy, ase, PIL, matplotlib, yaml, sklearn, cma" \
   || die "Python packages missing in $ENV_NAME"
+python -c "import PySide6" 2>/dev/null \
+  || say "warning: PySide6 not importable; the desktop interface band_fit_gui.py will not start"
 
 # ---------------------------------------------------------------- YAeHMOP
 if [ "$BUILD_YAEHMOP" = 1 ]; then

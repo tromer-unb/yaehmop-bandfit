@@ -2,6 +2,9 @@
 
 This guide contains **real commands**. The CIF never creates a DFT reference; you must supply a physically documented PNG or numeric band CSV.
 
+> Prefer windows to the terminal? `python band_fit_gui.py` opens the desktop interface with every
+> command below ([GUI.md](GUI.md)).
+
 ## 1. Install once
 
 ~~~bash

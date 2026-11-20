@@ -9,6 +9,12 @@ conda activate yaehmop-bandfit
 
 `install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation. Use `--yaehmop-bind PATH --yaehmop-params PATH` for an existing YAeHMOP instead of `--build-yaehmop`, `--env NAME` for another name and `--help` for all options.
 
+## Graphical interface
+
+`python band_fit_gui.py` opens the desktop interface (see [GUI.md](GUI.md)). It needs PySide6:
+`environment.yml` / `install.sh` install `PySide6-Essentials`; in another environment run
+`pip install PySide6-Essentials`.
+
 ## Supported local environment
 
 Recommended: Python 3.10+ on Linux or macOS. Native YAeHMOP is a separate C/Fortran executable and may require compiler, BLAS/LAPACK and platform-specific build dependencies. The Python input formatter and plotting utilities do **not** need native YAeHMOP.

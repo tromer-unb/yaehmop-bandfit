@@ -2,6 +2,13 @@
 
 **Para quem tem um CIF, uma figura de bandas e quer ajustar e reproduzir o espectro de um material.** Este é o fluxo individual para semicondutores não magnéticos com gap positivo e referências de 2, 4, 6 ou 8 bandas. O exemplo abaixo usa o nome MoS2, mas o **CIF e o PNG são fornecidos pelo leitor**. Não é uma reprodução automática de DFT a partir do CIF.
 
+## 0. Interface gráfica
+
+Quem prefere janelas a linha de comando pode usar `python band_fit_gui.py` (com o ambiente
+`yaehmop-bandfit` ativado): ajuste por figura das bandas + estrutura, ajuste a uma pasta DFT, SOC,
+spin polarizado, transferência e ferramentas de imagem, com todas as opções dos comandos, vários
+ajustes ao mesmo tempo, progresso ao vivo, figuras e métricas. Detalhes em [GUI.md](GUI.md).
+
 ## 1. Instalar e colocar os arquivos
 
 ~~~bash

@@ -17,3 +17,5 @@ dependencies:
   - pyyaml>=6.0
   - scikit-learn           # optimizer "bayesian" (Gaussian process)
   - cma                    # optimizer "cmaes"
+  - pip:
+      - PySide6-Essentials   # desktop interface band_fit_gui.py (Qt)
