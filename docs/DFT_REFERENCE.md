@@ -39,8 +39,9 @@ If the occupied-band count is wrong, set `--valence-bands N`.
 (VASP `LSORBIT`/`LNONCOLLINEAR`, QE `noncolin`, SIESTA `SpinOrbit`/`Spin SO`),
 and spin-polarized runs whose two channels differ. FHI-aims runs with
 `include_spin_orbit` use the `*.no_soc` band files when they exist. Metals
-(bands crossing the Fermi level, or no gap above the occupied bands) are refused,
-because the fitter aligns and scores the bands around the gap. VASP hybrid runs
+(bands crossing the Fermi level, or no gap above the occupied bands) are refused by the
+gap-based objectives (`window`, `frontier`); fit them with `objective = metal` (below).
+VASP hybrid runs
 with the SCF mesh in the same file keep only the zero-weight path points.
 
 ## How the DFT path becomes the YAeHMOP path
@@ -98,6 +99,16 @@ H(R) − E_mid·S(R) with E_F = 0, where E_mid is the EHT midgap (`eht_midgap_eV
 in `fit_summary.json`): `wtb.x` reproduces the YAeHMOP bands relative to midgap
 (checked for MoS₂: 10⁻⁴ eV near the gap, single-precision level). Add E_mid for
 absolute YAeHMOP energies; `hamiltonian_overlap_k.dat` has the unshifted values.
+For a metal (`objective = metal`) E_mid is replaced by the EHT energy of the DFT Fermi level
+(`eht_midgap_eV` = `eht_fermi_eV`), so the zero of `huckel-NP.dat` is E_F.
+
+**Exportability.** H(R), S(R) are only useful if S(k) is positive definite. Very diffuse
+shells (small ζ, often added ones) with the lattice sums cut at r cells can break this.
+The fitter therefore accepts a new best candidate only if the smallest eigenvalue of S(k)
+at every k point of the export (Γ mesh + band path) is at least `overlap_min_eig`
+(`[fit]`, default 10⁻³; 0 disables the check); `fit.json` → `overlap_check` counts the
+checks and rejected candidates. The export never stops: `fit_summary.json` →
+`tight_binding_files.overlap_min_eigenvalue` (and `warning` if it is not positive).
 Orbital order is YAeHMOP's: s; px, py, pz; dx²−y², dz², dxy, dxz, dyz
 (l, m as in sisl: px m=1, py m=−1, pz m=0; dxy −2, dyz −1, dz² 0, dxz 1, dx²−y² 2).
 
@@ -149,6 +160,39 @@ occupied bands below the common Fermi level, each channel needs a gap). `spin_co
 then the same n spin-down), with zero up-down blocks and each channel shifted by
 (DFT midgap of the channel − E_F) so that the exchange splitting of the DFT is kept. Output:
 `huckel-SP.dat` + `basis_set-SP` (WanTiBEXOS `SP` format).
+
+## Metals (`objective = metal`)
+
+No gap, so no midgap or VBM to align at. The DFT bands are taken relative to the Fermi level
+and paired from the bottom with the EHT bands (DFT band j ↔ EHT band j); the EHT bands are
+shifted by the constant c that minimizes the g-weighted RMS (closed form), and −c is the Fermi
+level of the model. Settings in `[objective]` (same names as `window`): `window_min`,
+`window_max` (relative to E_F), `energy_scale`, `far_weight`, `w_frontier`, `frontier_scale`,
+`w_high_symmetry`, `w_extrema`, `w_position`, `w_slope`, `band_weights` (`v1` = lowest band).
+`fermi = …` in `[reference]` replaces the Fermi level of the band files (use the SCF one).
+`fit_summary.json` also counts the EHT states below the model E_F on the export mesh
+(electrons per cell in that channel). For a spin-polarized metal fit each channel with
+`--spin-channel`; both are already at the common E_F, so `spin_combine.py` adds no shift.
+Example: `validation/vasp/Fe_bcc_pbe_spin` with `validation/refine_fe/`:
+
+```ini
+[reference]
+dft_code = vasp
+fermi = 5.86385846
+[band_path]
+points_per_segment = 20
+dimension = 3
+[objective]
+window_min = -9
+window_max = 3
+energy_scale = 2
+far_weight = 0.15
+[fit]
+objective = metal
+budget = 10000
+optimizer = cmaes
+polish = nelder-mead
+```
 
 The tool exports the Hamiltonian to WanTiBEXOS in all three cases: `huckel-NP.dat`
 (spinless), `huckel-SOC.dat` (spin–orbit) and `huckel-SP.dat` (spin-polarized).

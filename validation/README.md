@@ -5,7 +5,8 @@ files the reader needs (no wavefunctions, charge densities, pseudopotentials or
 POTCAR). `fitting/<protocol>/` inside each example has the standard outputs of one fit
 protocol (`frontier-de-300` is the first run; `frontier-de`, `window-de`, `window-ga`,
 `window-cmaes`, `window-ga-basis` come from `compare_strategies.py`; `soc-from-<protocol>`
-are spin-orbit fits made by `USER_WORKFLOW/soc_fit.py` on top of that protocol). Each has
+are spin-orbit fits made by `USER_WORKFLOW/soc_fit.py` on top of that protocol; `refine-*`,
+`v1c3-*` and `metal-*` are the targeted refinements below). Each has
 (parameters, comparison figures, YAeHMOP H(R)/S(R) in the WanTiBEXOS text format `huckel-NP.dat` + `basis_set-NP`, and H(k)/S(k) at the high-symmetry points), produced by
 
 ```bash
@@ -18,7 +19,31 @@ Only the **two best protocols** of each example (plus the spin-orbit fits) are i
 repository; a `fitting/.gitignore` per example keeps the other protocol folders local.
 Matrix files above 10 MB are stored compressed (`huckel-NP.dat.gz`, `gunzip` before use
 in WanTiBEXOS). Targeted refinements: `refine/`, `refine2/`, `refine3/`, `refine_w90/`
-(settings `*.ini`, each starting from an earlier fit with `start_from`).
+(settings `*.ini`, each starting from an earlier fit with `start_from`), and:
+
+- `refine_v1c3/` — Al₂O₂ bilayer fitted on **VB1 + CB1–3 only** (window from 2.6 eV below the
+  VBM, `n_cond = 3`, weight 10 on v1, c1, c2, c3). `run.sh [protocols]` writes
+  `siesta/Al2O2_bilayer_test/fitting/v1c3-<protocol>`. Protocols: `cmaes`, `cmaes-start`
+  (s,p basis), `cmaes-basis`, `cmaes-basis-8k`, `cmaes-basis-r2` (+ Al 3d), `ga-basis`,
+  `cmaes-basis-AlO` (+ Al 3d, O 3d). Best: `v1c3-cmaes-basis-8k` (VB1 0.06, CB1 0.16, CB2 0.30,
+  CB3 0.36 eV, gap −0.006 eV); the s,p basis stays at 0.6–0.9 eV on CB1–3.
+- `refine_fe/` — ferromagnetic bcc Fe, a **metal** (`objective = metal`, `fermi` of the SCF run
+  in `[reference]`, window −9…+3 eV around E_F). `run.sh <ini> <protocol>` fits the spin-up and
+  spin-down channels in parallel into `vasp/Fe_bcc_pbe_spin/fitting/<protocol>/spin_up|spin_down`
+  and joins them with `spin_combine.py` in `<protocol>/spin_polarized/huckel-SP.dat`.
+  Protocols: `metal-cmaes` (`Fe_metal.ini`, 3000 calls), `metal-cmaes-10k`, `metal-de`,
+  `metal-ga`, `metal-bo` (Bayesian, 600), `metal-cmaes-ef` (more weight at E_F). Best:
+  `metal-cmaes-10k` (window RMS up 0.103 / down 0.159 eV; within 1 eV of E_F 0.036 / 0.091 eV;
+  electrons per channel 5.15 / 2.88 vs DFT 5.12 / 2.88).
+
+Independent protocols and spin channels can run at the same time (one process each; note
+that `nproc` reports 1 when `OMP_NUM_THREADS=1`, use `nproc --all`).
+
+**H and S are always exportable.** Every new best candidate of a fit is accepted only if the
+overlap S(k) is positive definite (smallest eigenvalue ≥ `overlap_min_eig`, default 10⁻³, in
+`[fit]`) at every k point of the export (Γ mesh + band path); `fit_summary.json` records
+`overlap_min_eigenvalue`. Very diffuse added shells (e.g. Al 3d + O 3d in `cmaes-basis-AlO`)
+are rejected this way.
 
 These examples are meant for comparing fitting strategies (optimizers, budgets,
 number of bands, objectives) on the same references.
@@ -31,7 +56,7 @@ number of bands, objectives) on the same references.
 | QE | `Si_diamond_lda` | Si, diamond, LDA | 3D | pw.x output (text) |
 | QE | `Si_wurtzite_lda` | Si, wurtzite, LDA | 3D | eigenvalues from the `bands.x` file (pw.x did not print them) |
 | QE | `SiC_zincblende_pbe` | 3C-SiC, PBE | 3D | `sic.save/data-file-schema.xml` |
-| SIESTA | `Al2O2_bilayer_test` | Al₂O₂ bilayer (test) | 2D | `.bands` + `BandLines`, structure from `.STRUCT_OUT` |
+| SIESTA | `Al2O2_bilayer_test` | Al₂O₂ bilayer (test) | 2D | `.bands` + `BandLines`, structure from `.STRUCT_OUT`; files named Al2O3; best fit `v1c3-cmaes-basis-8k` (VB1 + CB1–3, + Al 3d) |
 | SIESTA | `CNR_nanoribbon_1d_pbe` | carbon nanoribbon C₅₂H₁₆, PBE | 1D | 224 EHT orbitals |
 | SIESTA | `MoS2_monolayer_pbe_soc` | MoS₂ monolayer, PBE + SOC | 2D | `SOC_ONLY` (refused by spinless fits); SOC fit on top of the EHT of `aims/MoS2_monolayer_pbe/fitting/window-cmaes` (same cell) |
 | FHI-aims | `MoS2_monolayer_pbe` | MoS₂ monolayer, PBE | 2D | all-electron eigenvalues |
@@ -41,6 +66,7 @@ number of bands, objectives) on the same references.
 | FHI-aims | `MoS2_monolayer_hse06_soc` | MoS₂ monolayer, HSE06 | 2D | SOC run: the `*.no_soc` band files are used |
 | VASP | `ZnI2_monolayer_pbe_soc` | ZnI₂ monolayer, PBE + SOC | 2D | `SOC_ONLY`; SOC fit on top of `ZnI2_monolayer_pbe/fitting/window-ga-basis` |
 | VASP | `In2S2_monolayer_pbe_soc` | In₂S₂ monolayer, PBE + SOC | 2D | `SOC_ONLY`; SOC fit on top of `In2S2_monolayer_pbe/fitting/window-cmaes` |
+| VASP | `Fe_bcc_pbe_spin` | bcc Fe, ferromagnetic PBE (`ISPIN = 2`, 2.24 μB), **metal** | 3D | `vasprun.xml` of the band run; `scf/` keeps the SCF Fermi level (5.864 eV, used through `fermi` in the INI); fitted per spin channel with `objective = metal` (`refine_fe/`); `huckel-SP.dat.gz` |
 
 The MoS₂ HSE06 example (FHI-aims) holds the SOC bands too: its spinless fits use the
 `*.no_soc` files and `fitting/soc-from-window-ga` uses the bands with SOC.

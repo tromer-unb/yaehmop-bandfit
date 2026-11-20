@@ -10,6 +10,8 @@
 | `N reliable curve colors were not found` | Supply distinct `--colors` or use exact CSV/manual annotations. Do not invent missing bands. |
 | `Not a verified P5 bitplane` | A normal gray PNG is not the 8-bit layer format. Use `--mode colors`, `mono`, `auto` or numeric CSV. |
 | `Invalid band gap` | The gapped semiconductor interface does not accept gapless Dirac/metal cases; use the separately designed carbon protocol. |
+| `metallic reference` / `No positive gap` with a DFT folder of a metal | Use `objective = metal` (bands aligned at E_F) and set `fermi = …` in `[reference]` to the Fermi level of the SCF run; see `docs/DFT_REFERENCE.md` (Metals). |
+| `overlap S(k) not positive definite` (warning in the export, or many `overlap` rejections in `history.csv`) | The basis is nearly linearly dependent, usually very diffuse added shells (small ζ). The fitter rejects such candidates (`overlap_min_eig` in `[fit]`, default 10⁻³), so new fits always export H(R), S(R); for an old parameter set, refit, drop the extra shell, or raise the lower ζ bound. |
 | `Invalid raster / multipage` | Export **one** still raster frame in 8-bit RGB; animated GIF and multipage TIFF have ambiguous scientific meaning. |
 | Diamond/graphite are treated as 2D | Set `dimension = 3` in `[band_path]`. Fitting and recomputation now both write `Lattice 3` with the same overlap radius. Fits made before this fix were optimized as a 2D slab (`Lattice 2`, images `5 5 0`) even with `dimension = 3`; `--from-fit` warns about such `fit.json` files and they must be refitted. |
 | GitHub Actions are slow or use too much compute | Actions deliberately run lightweight source+I/O tests only; full physical fitting must be performed locally by users. |
