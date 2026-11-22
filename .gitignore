@@ -36,6 +36,8 @@ checkpoint/
 *.band
 *.orb
 *.out
+# DFT outputs of the validation examples are test inputs (tests/test_dft_bands.py)
+!validation/*/*/*.out
 *.npz
 *.npy
 *.pickle
