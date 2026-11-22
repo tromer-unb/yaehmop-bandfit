@@ -133,7 +133,15 @@ Weights go in an `[objective]` INI section (`w_extrema = 6`, `energy_scale = 1.5
 
 Targeted refinement: `band_weights = v1:10 v2:6 c1:10 ...` with `w_bands` (named bands counted
 from the gap), `w_slope` (dispersion: ΔE between consecutive k points) and `w_mass` (curvature
-at the band edges) in `[objective]`; `--start-from FITTINGDIR` starts from an earlier fit (also of
+at the band edges) in `[objective]`; `w_split` (`[objective]`, also in a family manifest's `objective_settings`) compares the splittings,
+i.e. the energy differences between neighbouring bands at every k point, DFT against EHT (g-weighted,
+inside the window). It targets the splitting of the N copies of a band in an N-layer slab, which the
+band RMS barely penalizes when all copies stay close to the DFT average. `segment_weights = 0:3 3:3`
+multiplies the state weights of path segments 0 and 3 (counted along the path, as in the figure ticks)
+by 3, to stress one region of the Brillouin zone. Both work with the window and metal objectives; the
+metric `rms_split_eV` is reported.
+
+`--start-from FITTINGDIR` starts from an earlier fit (also of
 another material) with the bounds centred there. Examples: `validation/refine/*.ini`.
 
 `--basis-add "S:d H:p"` or `auto` adds shells YAeHMOP accepts but the stock table lacks

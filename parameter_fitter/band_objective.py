@@ -56,6 +56,12 @@ class WindowSettings:
     # compared bands, g- and band-weighted; and curvature (effective mass) at the VBM/CBM
     w_slope: float = 0.0
     w_mass: float = 0.0
+    # Splittings: differences between neighbouring bands (E_j+1 - E_j) at every k point, EHT vs DFT,
+    # g-weighted; targets the splitting of the N copies of a band in an N-layer slab
+    w_split: float = 0.0
+    # Extra weight of path segments, by index along the path (0 = first segment, as in the figure
+    # ticks): "0:4 3:4" multiplies the state weights g(E) of segments 0 and 3 by 4
+    segment_weights: str = ""
 
     @classmethod
     def from_dict(cls, d):
@@ -64,9 +70,10 @@ class WindowSettings:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"Unknown objective settings: {sorted(unknown)}; valid: {sorted(names)}")
-        conv = {"n_cond": int, "band_weights": str}
+        conv = {"n_cond": int, "band_weights": str, "segment_weights": str}
         s = cls(**{k: conv.get(k, float)(v) for k, v in d.items()})
         parse_band_weights(s.band_weights)
+        parse_segment_weights(s.segment_weights)
         return s
 
     def to_dict(self):
@@ -83,6 +90,35 @@ def parse_band_weights(text):
             raise ValueError(f"band weight {item!r}: use v1:10 c2:5 (valence/conduction band counted from the gap)")
         out[(key[0], int(key[1:]))] = float(w)
     return out
+
+
+def parse_segment_weights(text):
+    """'0:4 3:4' -> {0: 4.0, 3: 4.0} (segment index along the path: weight factor)."""
+    out = {}
+    for item in str(text or "").replace(",", " ").split():
+        key, _, w = item.partition(":")
+        if not key.strip().isdigit() or not w:
+            raise ValueError(f"segment weight {item!r}: use 0:4 3:2 (segment index along the path:factor)")
+        out[int(key)] = float(w)
+    return out
+
+
+def _segment_factor(xs, nodes_x, spec):
+    """Weight factor of every k point from segment_weights (1 elsewhere)."""
+    f = np.ones(len(xs))
+    sw = parse_segment_weights(spec)
+    if sw:
+        for i, (a, b) in enumerate(_segments(np.asarray(xs, float), nodes_x)):
+            if i in sw:
+                f[a:b + 1] = np.maximum(f[a:b + 1], sw[i])   # shared end points: the larger factor
+    return f
+
+
+def _split_rms(A, B, inside, G):
+    """g-weighted RMS of the error in the gaps between neighbouring bands (splittings)."""
+    dA = A[:, 1:] - A[:, :-1]; dB = B[:, 1:] - B[:, :-1]
+    W = 0.5 * (G[:, 1:] + G[:, :-1]) * (inside[:, 1:] & inside[:, :-1])
+    return float(np.sqrt(np.sum(W * (dB - dA) ** 2) / np.sum(W))) if np.sum(W) > 0 else 0.0
 
 
 def _segments(x, nodes_x):
@@ -120,6 +156,7 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
     gap_ref = float(A[:, ov].min()); gap_eht = float(B[:, ov].min())
     e_mid = 0.5 * gap_ref                      # Fermi level in the middle of the gap
     G = (s.far_weight + (1 - s.far_weight) * np.exp(-np.abs(A - e_mid) / max(s.energy_scale, 1e-6))) * inside
+    G = G * _segment_factor(x, nodes_x, s.segment_weights)[:, None]
 
     def wrms(d, w):
         return float(np.sqrt(np.sum(w * d ** 2) / np.sum(w))) if np.sum(w) > 0 else 0.0
@@ -207,6 +244,7 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
         "bands": s.w_bands * rbands ** 2,
         "slope": s.w_slope * rslope ** 2,
         "mass": s.w_mass * rmass ** 2,
+        "split": s.w_split * _split_rms(A, B, inside, G) ** 2,
     }
     window_rms = float(np.sqrt(np.mean(D[inside] ** 2)))
     near = inside & (np.abs(A - e_mid) <= 2.0)
@@ -221,6 +259,7 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
                 rms_high_symmetry_eV=rhs, rms_extrema_eV=rext,
                 n_valence_compared=int(nv), n_conduction_compared=int(nc),
                 rms_named_bands_eV=rbands, rms_slope_eV=rslope, mass_log_error=rmass,
+                rms_split_eV=_split_rms(A, B, inside, G),
                 rms_v1v3_c1c3_eV=float(np.sqrt(np.mean(D[:, max(0, ov - 3):ov + 3] ** 2))),
                 **per_band,
                 **{f"term_{k}": float(v) for k, v in terms.items()})
@@ -246,6 +285,7 @@ def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
     if not inside.any():
         raise ValueError("no DFT band inside the metal window")
     G = (s.far_weight + (1 - s.far_weight) * np.exp(-np.abs(A) / max(s.energy_scale, 1e-6))) * inside
+    G = G * _segment_factor(x, nodes_x, s.segment_weights)[:, None]
     c = float(np.sum(G * (A - B0)) / np.sum(G))
     B = B0 + c
     D = B - A
@@ -297,6 +337,7 @@ def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
         "extrema": s.w_extrema * rext ** 2 + s.w_position * rpos ** 2,
         "bands": s.w_bands * rbands ** 2,
         "slope": s.w_slope * rslope ** 2,
+        "split": s.w_split * _split_rms(A, B, inside, G) ** 2,
     }
     near = inside & (np.abs(A) <= 2.0)
     near1 = inside & (np.abs(A) <= 1.0)
@@ -307,7 +348,7 @@ def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
                 max_abs_in_window_eV=float(np.abs(D[inside]).max()),
                 fermi_weighted_rms_eV=rf, g_weighted_rms_eV=rw,
                 rms_high_symmetry_eV=rhs, rms_extrema_eV=rext, rms_named_bands_eV=rbands,
-                rms_slope_eV=rslope, n_bands_compared=int(nb),
+                rms_slope_eV=rslope, rms_split_eV=_split_rms(A, B, inside, G), n_bands_compared=int(nb),
                 n_bands_in_window=int(inside.any(axis=0).sum()), **per_band,
                 **{f"term_{k}": float(v) for k, v in terms.items()})
 
