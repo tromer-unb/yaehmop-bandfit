@@ -16,7 +16,7 @@ python -m pip install -r requirements.txt
 python quick.py                 # saved figures, no physics calculation
 ~~~
 
-For a physical fit or transfer, separately install [upstream YAeHMOP](https://github.com/greglandrum/yaehmop) and its licensed atomic parameter table; neither is bundled.
+For a physical fit or transfer, install YAeHMOP (`./install.sh --build-yaehmop` compiles the fork [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop); [upstream](https://github.com/greglandrum/yaehmop) also works without double-zeta p) and its atomic parameter table; neither is bundled.
 
 ~~~bash
 export YAEHMOP_BIND=/absolute/path/to/yaehmop/bind

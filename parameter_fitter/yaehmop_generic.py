@@ -42,11 +42,42 @@ def resolve_yaehmop_assets():
 
 def run_bind(bind, input_file, param_file, log_file=None):
     bind,input_file,param_file=map(Path,(bind,input_file,param_file))
-    proc=subprocess.run([str(bind),str(input_file),str(param_file)],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    # one BLAS/LAPACK thread per bind run: the fitters already run several systems in parallel,
+    # and a threaded MKL/OpenBLAS build would oversubscribe the CPUs (override via the environment)
+    env=dict(os.environ)
+    for var in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):env.setdefault(var,"1")
+    proc=subprocess.run([str(bind),str(input_file),str(param_file)],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env)
     if log_file is not None: Path(log_file).write_text(proc.stdout)
     if proc.returncode != 0:
         raise RuntimeError(f"YAeHMOP bind failed ({proc.returncode}); see {log_file}.\n{proc.stdout[-4000:]}")
+    check_double_zeta_sp(bind,input_file,param_file)
     return proc
+
+def _double_zeta_sp_shells(param_file):
+    """(element, shell) of the s/p lines with Nzeta = 2 and a nonzero second coefficient."""
+    out=[]
+    for raw in Path(param_file).read_text().splitlines():
+        f=raw.split()
+        if len(f)>=11 and not raw.lstrip().startswith(';') and f[5].lower() in ('s','p'):
+            try:
+                if int(f[3])==2 and abs(float(f[10]))>0:out.append((f[0],f[5].lower()))
+            except ValueError:
+                pass
+    return out
+
+def check_double_zeta_sp(bind,input_file,param_file):
+    """The original YAeHMOP reads double-zeta s/p lines but uses only the first exponent,
+    silently. A bind with double-zeta p (github.com/ac-dias/yaehmop) lists such a shell as
+    '3P DZ:' in the .out; refuse the result when that line is missing."""
+    dz=_double_zeta_sp_shells(param_file)
+    if not dz:return
+    out=Path(str(input_file)+'.out')
+    if not out.is_file():return
+    text=out.read_text(errors='replace')
+    if 'P DZ:' not in text and 'S DZ:' not in text:
+        raise RuntimeError(f"{bind} ignores the second exponent of the double-zeta shells {dz}: "
+                           "use a bind with double-zeta p support (github.com/ac-dias/yaehmop, commit "
+                           "742719c or later) through YAEHMOP_BIND")
 
 def parse_band(path):
     path=Path(path); lines=path.read_text().splitlines(); norb=None
@@ -111,13 +142,36 @@ def write_parameter_file(path,params):
     Path(path).write_text('\n'.join(lines)+'\n')
     return Path(path)
 
+def contiguous_along_vacuum(atoms,periodic_dim):
+    """Copy of atoms with the slab (2D) or wire (1D) made contiguous along the
+    non-periodic lattice directions.
+
+    A DFT code is periodic in 3D, so an atom of a slab may sit at z = 0.9999 instead of
+    z = -0.0001 (wrapped across the vacuum). YAeHMOP has no images along the inactive
+    directions, so such an atom would be isolated from its layer. Along each inactive axis
+    the fractional coordinates are cut at the largest empty interval (the vacuum)."""
+    a=atoms.copy()
+    if periodic_dim>=3 or len(a)<2:
+        return a
+    frac=a.get_scaled_positions(wrap=False)
+    for ax in range(periodic_dim,3):
+        z=np.mod(frac[:,ax],1.0);s=np.sort(z)
+        gaps=np.append(np.diff(s),s[0]+1.0-s[-1])
+        i=int(np.argmax(gaps));start=s[(i+1)%len(s)]
+        new=np.mod(z-start,1.0)+start
+        # whole-cell translation back near the original coordinates (no physical change)
+        frac[:,ax]=new+np.round(np.mean(frac[:,ax])-np.mean(new))
+    a.set_scaled_positions(frac)
+    return a
+
 def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2,structure_format=None,kpoints=None):
     """cif_path: any structure file read by structure_io (CIF, VASP, QE, SIESTA, FHI-aims)."""
     from structure_io import read_structure
     cif_path,out_path=Path(cif_path),Path(out_path)
-    atoms=read_structure(cif_path,structure_format); frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
     if periodic_dim not in (1,2,3):
         raise ValueError("periodic_dim must be 1, 2, or 3")
+    atoms=contiguous_along_vacuum(read_structure(cif_path,structure_format),periodic_dim)
+    frac=atoms.get_scaled_positions(wrap=False); syms=atoms.get_chemical_symbols(); nphys=len(atoms)
     if len(overlap_images)!=3 or any(int(v)<0 for v in overlap_images):
         raise ValueError("overlap_images must contain three nonnegative integers")
     if any(int(v)!=0 for v in overlap_images[periodic_dim:]):

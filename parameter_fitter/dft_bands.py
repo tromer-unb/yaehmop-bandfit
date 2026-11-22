@@ -55,6 +55,8 @@ class DFTBands:
     nocc_source: str = ""
     spin_channel: str | None = None
     metallic: bool = False        # no gap: bands are aligned at the Fermi level
+    nelect: float | None = None   # valence electrons of the DFT calculation (when the files give it)
+    skipped_bands: int = 0        # lowest DFT bands removed (semicore states absent from the EHT basis)
 
 
 def normalize_code(code):
@@ -292,10 +294,11 @@ def read_vasp(folder, dft_file=None, soc=False):
     if nper and len(kfrac) % nper == 0 and nper >= 2:
         segments = [np.arange(s, s + nper) for s in range(0, len(kfrac), nper)]
     return DFTBands("vasp", atoms, kfrac, E, nocc, efermi, segments, labels, files, notes,
-                    nocc_source=f"NELECT={nelect:g}")
+                    nocc_source=f"NELECT={nelect:g}", nelect=float(nelect))
 
 
 _SPIN_CHANNEL = None   # set by read_dft_bands(spin_channel=...) for collinear spin-polarized runs
+_SPIN_AVERAGE = False  # read_dft_bands(spin_channel="average"): mean of the two channels
 
 
 def _merge_spins(spins, notes):
@@ -306,11 +309,18 @@ def _merge_spins(spins, notes):
         return spins[_SPIN_CHANNEL - 1]
     if len(spins) == 1:
         return spins[0]
+    if _SPIN_AVERAGE:
+        up, dn = np.sort(spins[0], axis=1), np.sort(spins[1], axis=1)
+        notes.append(f"spin-polarized run: mean of the up and down channels used "
+                     f"(largest up-down difference {np.max(np.abs(up - dn)):.3f} eV)")
+        return 0.5 * (up + dn)
     if np.max(np.abs(spins[0] - spins[1])) < 1e-3:
         notes.append("spin-polarized run with identical channels: spin 1 used")
         return spins[0]
-    raise ValueError("Spin-polarized reference with different up/down bands: not supported "
-                     "by spinless EHT")
+    raise ValueError(f"Spin-polarized reference with different up/down bands "
+                     f"(largest difference {np.max(np.abs(spins[0] - spins[1])):.3f} eV): not supported "
+                     "by spinless EHT; fit one channel (spin_channel up/down) or, for a spurious tiny "
+                     "magnetization, the mean of both (spin_channel average)")
 
 
 # --------------------------------------------------------------------------
@@ -549,7 +559,7 @@ def read_qe(folder, dft_file=None, soc=False):
         files["labels"] = str(inp)
     return DFTBands("qe", atoms, kfrac, E, 0 if _SPIN_CHANNEL else nocc_from_electrons(nelec, spinor=soc),
                     fermi, None, labels, files, notes,
-                    nocc_source=f"nelec={nelec:g}")
+                    nocc_source=f"nelec={nelec:g}", nelect=float(nelec))
 
 
 # --------------------------------------------------------------------------
@@ -898,15 +908,17 @@ def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, s
     spin_channel='up'/'down' (or 1/2) reads one channel of a collinear spin-polarized
     run; its occupied bands are those below the common Fermi level.
     """
-    global _SPIN_CHANNEL
+    global _SPIN_CHANNEL, _SPIN_AVERAGE
     folder = Path(folder).expanduser().resolve()
     if not folder.is_dir():
         raise FileNotFoundError(f"DFT folder not found: {folder}")
-    ch = {None: None, "up": 1, "down": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(
-        spin_channel if not isinstance(spin_channel, str) else spin_channel.lower())
-    if spin_channel is not None and ch is None:
-        raise ValueError("spin_channel must be up or down")
+    key = spin_channel if not isinstance(spin_channel, str) else spin_channel.lower()
+    average = key in ("average", "mean", "avg")
+    ch = None if average else {None: None, "up": 1, "down": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(key)
+    if spin_channel is not None and ch is None and not average:
+        raise ValueError("spin_channel must be up, down or average")
     _SPIN_CHANNEL = ch
+    _SPIN_AVERAGE = average
     try:
         if metallic:
             ref = _read_metal(folder, code, dft_file, soc)
@@ -914,6 +926,9 @@ def read_dft_bands(folder, code, dft_file=None, valence_bands=None, soc=False, s
             ref = READERS[normalize_code(code)](folder, dft_file, soc=soc)
     finally:
         _SPIN_CHANNEL = None
+        _SPIN_AVERAGE = False
+    if average:
+        ref.spin_channel = "average"
     if fermi is not None:
         ref.notes.append(f"Fermi level set by the user: {float(fermi):.4f} eV (file: {ref.fermi})")
         ref.fermi = float(fermi)
@@ -1053,6 +1068,37 @@ class EHTReference:
     real_lines: list         # bool per line
 
 
+def drop_lowest_bands(ref, n):
+    """Remove the n lowest DFT bands (semicore states such as Ti 3s3p of a Ti_sv PAW
+    potential, absent from the EHT valence basis). Occupied-band and electron counts follow."""
+    n = int(n)
+    if n <= 0:
+        return ref
+    E = np.sort(np.asarray(ref.energies, float), axis=1)
+    if n >= E.shape[1] or (not ref.metallic and n >= ref.nocc):
+        raise ValueError(f"cannot drop {n} of {E.shape[1]} bands ({ref.nocc} occupied)")
+    ref.energies = E[:, n:]
+    ref.nocc = max(0, int(ref.nocc) - n)
+    if ref.nelect is not None:
+        ref.nelect = float(ref.nelect) - 2 * n
+    ref.skipped_bands = int(ref.skipped_bands) + n
+    ref.notes.append(f"{n} lowest DFT bands dropped (semicore, absent from the EHT basis); "
+                     f"highest dropped state {E[:, n - 1].max():.2f} eV, next {E[:, n].min():.2f} eV")
+    return ref
+
+
+def semicore_band_count(ref, eht_nelec):
+    """Bands to drop so that the DFT and EHT valence electron counts agree:
+    (NELECT_DFT - n_electrons_EHT) / 2. Needs the DFT electron count."""
+    if ref.nelect is None:
+        raise ValueError("semicore = auto needs the DFT electron count (VASP, QE); give an integer instead")
+    extra = float(ref.nelect) - float(eht_nelec)
+    if extra < -1e-6 or abs(extra / 2 - round(extra / 2)) > 1e-6:
+        raise ValueError(f"DFT electrons ({ref.nelect:g}) minus EHT electrons ({eht_nelec:g}) is not a "
+                         "non-negative even number: set semicore explicitly")
+    return int(round(extra / 2))
+
+
 def eht_reference(ref, n=20, periodic_dim=3):
     """YAeHMOP path through the DFT segments and DFT energies at its k points."""
     cell = np.asarray(ref.atoms.cell)
@@ -1065,20 +1111,27 @@ def eht_reference(ref, n=20, periodic_dim=3):
         raise ValueError("points per line must be >= 2")
     kf = np.array(ref.kfrac, float)
     E = np.asarray(ref.energies, float)
+    rec = 2 * np.pi * np.linalg.inv(cell).T
+    rec[periodic_dim:] = 0.0                   # inactive directions carry no k
+    # Segments along inactive directions only (e.g. Gamma-A of a bulk path used for a slab)
+    # have zero length for YAeHMOP: drop them, and treat their end points as the same node
+    active = [s for s in segs if np.linalg.norm((kf[s[-1]] - kf[s[0]]) @ rec) > 1e-8]
+    if not active:
+        raise ValueError("Zero-length k path in the periodic directions")
+    segs = active
     nodes, real, seg_of_line = [kf[segs[0][0]]], [], []
     for s in segs:
         a, b = kf[s[0]], kf[s[-1]]
-        if not np.allclose(a, nodes[-1], atol=1e-6):
+        if not np.allclose(a[:periodic_dim], nodes[-1][:periodic_dim], atol=1e-6):
             nodes.append(a); real.append(False); seg_of_line.append(None)   # jump
         nodes.append(b); real.append(True); seg_of_line.append(s)
     nodes = np.array(nodes)
     L = len(nodes) - 1
-    rec = 2 * np.pi * np.linalg.inv(cell).T
-    rec[periodic_dim:] = 0.0                   # inactive directions carry no k
 
     def interp(line, t):
-        s, a, b = seg_of_line[line], nodes[line], nodes[line + 1]
-        tt = (kf[s] - a) @ (b - a) / max((b - a) @ (b - a), 1e-30)
+        s = seg_of_line[line]
+        a, b = kf[s[0]], kf[s[-1]]             # the segment's own end points (nodes may differ
+        tt = (kf[s] - a) @ (b - a) / max((b - a) @ (b - a), 1e-30)   # in inactive directions)
         o = np.argsort(tt)
         return np.array([np.interp(t, tt[o], E[s][o, j]) for j in range(E.shape[1])])
 

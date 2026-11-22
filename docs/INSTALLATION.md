@@ -7,7 +7,9 @@
 conda activate yaehmop-bandfit
 ```
 
-`install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation. Use `--yaehmop-bind PATH --yaehmop-params PATH` for an existing YAeHMOP instead of `--build-yaehmop`, `--env NAME` for another name and `--help` for all options.
+`install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, compiles YAeHMOP from the fork [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (commit 9d6d15f by default; `--yaehmop-repo`, `--yaehmop-ref` choose another), stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation plus a check of double-zeta p support.
+
+**Why the fork.** It is the original program plus double-zeta p orbitals (needed by `basis_dz = X:p`), spin-polarized runs with one table per channel, spin-orbit coupling, a configurable K of the diagonal term and a few fixes. With single-zeta tables it gives exactly the bands of the original program (checked to |ΔE| = 0), so earlier fits are unchanged. The original program also works for everything except `basis_dz` on s/p shells, which it would silently ignore; band-fit detects this and stops. Use `--yaehmop-bind PATH --yaehmop-params PATH` for an existing YAeHMOP instead of `--build-yaehmop`, `--env NAME` for another name and `--help` for all options.
 
 ## Graphical interface
 
@@ -43,9 +45,10 @@ The synthetic sample depicts a semiconductor-like **toy** spectrum, not actual g
 
 ## Physical YAeHMOP installation (only when requested)
 
-Obtain YAeHMOP from its upstream project, following its **own installation and license**:
-- https://github.com/greglandrum/yaehmop
-- https://github.com/greglandrum/yaehmop/blob/master/docs/bind_manual.pdf
+Obtain YAeHMOP, following its **own installation and license** (BSD 2-clause):
+- recommended: the fork https://github.com/ac-dias/yaehmop (double-zeta p, spin, SOC; `tex/advances_in_yaehmop.pdf` documents every change)
+- upstream: https://github.com/greglandrum/yaehmop (no double-zeta p)
+- manual: https://github.com/greglandrum/yaehmop/blob/master/docs/bind_manual.pdf
 
 A Conda distribution may also be available at https://anaconda.org/conda-forge/yaehmop; check that the `bind` executable and compatible atomic table are present. This repository intentionally **does not bundle the solver, compiled binary or original atomic parameters**.
 

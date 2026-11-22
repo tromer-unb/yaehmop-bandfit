@@ -198,9 +198,14 @@ and \cmd{cma} (optimizer \cmd{cmaes}).
 
 \subsection{YAeHMOP}
 
-The solver and its atomic parameter table are \textbf{not bundled}. Build YAeHMOP from its upstream
-project (\url{https://github.com/greglandrum/yaehmop}, directory \cmd{tightbind}, CMake) or install it
-from conda-forge, then point the program to it:
+The solver and its atomic parameter table are \textbf{not bundled}. \cmd{./install.sh --build-yaehmop}
+compiles the fork \url{https://github.com/ac-dias/yaehmop} (commit 9d6d15f by default;
+\cmd{--yaehmop-repo}, \cmd{--yaehmop-ref} choose another). The fork is the original program plus
+double-zeta $p$ orbitals (needed by \cmd{--basis-dz X:p}), spin-polarized runs, spin--orbit coupling and a
+few fixes; with single-zeta tables it gives exactly the bands of the original program, so earlier fits
+are unchanged. The upstream program (\url{https://github.com/greglandrum/yaehmop}) works for everything
+except double-zeta $s/p$, which it reads but silently ignores; every YAeHMOP run of the program checks
+the \cmd{.out} for the \cmd{3P DZ:} line and stops in that case. To use an existing build:
 
 \begin{lstlisting}[style=sh]
 export YAEHMOP_BIND=/absolute/path/to/bind
@@ -392,9 +397,16 @@ Wannier90 & \cmd{seedname\_band.dat/.kpt} + \cmd{.nnkp} or \cmd{.win} & Fermi le
 
 Each straight DFT segment becomes a YAeHMOP band line (\cmd{points\_per\_segment} points) and the DFT
 eigenvalues are interpolated at exactly those k points; discontinuities (\cmd{X|U}) are computed but excluded
-from the error. The periodic dimension is detected from the vacuum unless given. Spin--orbit and
-spin-polarized (different channels) references and metals are refused; FHI-aims \cmd{*.no\_soc} files are used
-when present. \cmd{--from-fit} or \cmd{--from-parameters} with \cmd{--dft-dir} evaluate existing parameters.
+from the error. The periodic dimension is detected from the vacuum unless given. Spin--orbit references
+are refused (fit SOC afterwards, section~\ref{sec:soc}); spin-polarized runs with different channels need
+\cmd{--spin-channel up}, \cmd{down}, or \cmd{average} (mean of both channels, for a spurious small
+magnetization); metals need \cmd{objective = metal}. FHI-aims \cmd{*.no\_soc} files are used when present.
+Semicore states that the EHT basis lacks (Ti $3s3p$ of a \cmd{Ti\_sv} PAW potential, Ga $3d$, \ldots) are dropped:
+\cmd{--semicore auto} (default, \cmd{[reference] semicore}) removes the $(N_\mathrm{DFT}-N_\mathrm{EHT})/2$ lowest
+bands when the DFT electron count is known (VASP, QE); give an integer, or 0 to keep them. This matters for
+the metal objective, which pairs bands from the bottom. A slab computed with a bulk $k$ path (segments along
+the vacuum direction, e.g.\ $\Gamma$--A) is accepted: segments of zero length in the periodic directions are
+dropped. \cmd{--from-fit} or \cmd{--from-parameters} with \cmd{--dft-dir} evaluate existing parameters.
 Details in \cmd{docs/DFT\_REFERENCE.md}; real examples in \cmd{validation/}.
 
 Every fit, with any reference, writes the standard output folder described in
@@ -658,6 +670,14 @@ Older versions always wrote \cmd{Lattice 2} (images \cmd{5 5 0}) during the fit,
 \cmd{Lattice 3}. \cmd{--from-fit} prints a warning for such \cmd{fit.json} files. Refit 3D materials.
 \end{aviso}
 
+\paragraph{Slabs and wires wrapped across the vacuum.} A DFT code is periodic in 3D, so an atom of a slab may
+sit at $z=0.9999$ instead of $-0.0001$ (fractional), on the other side of the vacuum. YAeHMOP has no
+images along the inactive directions, so that atom would be isolated from its layer (flat bands of the
+isolated atom and dangling states of the layer). Before writing the YAeHMOP input and the exported
+\cmd{basis\_set-NP}/\cmd{POSCAR}, the atoms are made contiguous along every inactive direction, with the cut
+at the largest empty interval (the vacuum); already contiguous structures are unchanged. Fits of slabs made
+before this fix with such a structure must be redone.
+
 \begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{diamond_3d_periodicity_fix.png}
@@ -811,6 +831,16 @@ extended with the missing shells: \cmd{--basis-add "S:d H:p"} or \cmd{auto} ($p$
 element with $p$ but no $d$, e.g.\ Si, C, S, I; the filled $3d$ of Zn, which the stock table lacks although it counts
 12 electrons). Added shells start from estimates (a $d$ shell 4~eV above the $p$ level with $\zeta=0.8\,\zeta_p$; Zn $3d$
 double-zeta) and are fitted with the rest; they add empty states and do not change the electron count.
+
+\paragraph{Double-zeta shells (\cmd{--basis-dz}).} \cmd{--basis-dz "S:p"} (\cmd{[fit] basis\_dz},
+\cmd{basis\_dz:} in a family manifest) turns a single-zeta shell into a normalized contraction of two
+Slater functions: the existing exponent becomes the inner function and a diffuse tail
+($\zeta_2=\zeta_1/2$, $c_2/c_1=0.3$ at the start) is added; $\zeta_1$, $\zeta_2$ and $c_2/c_1$ are fitted.
+One exponent cannot always give both the bonds inside a layer and the coupling across a van der Waals gap
+(the splitting of the bands of the different layers of a slab); the tail adds that freedom. $d$ and $f$ shells
+work with the original YAeHMOP; $s/p$ shells need the fork (section on installation). The exported
+\cmd{huckel-NP.dat} and the WanTiBEXOS interface of the fork support double-zeta $p$ (checked with
+\cmd{wtb.x}: $3\times10^{-5}$~eV within 3~eV of $E_F$).
 
 \subsection{Best validation of each material}\label{sec:refine-results}
 \cmd{validation/compare\_strategies.py} refits every example with several protocols (\cmd{frontier-de}, \cmd{window-de},
@@ -1020,35 +1050,56 @@ target must be in the table. If the target had been inspected before, the evalua
 not prospectively blind.
 
 % ================================================================ 8
-\section{Family fit: one vector, held-out materials}
+\section{Family fit: one vector for several systems}
+
+\cmd{family\_fit.py} fits \emph{one} parameter table and one $K$ to several systems at once, for example
+one table per composition valid for several polymorphs and thicknesses. Every reference of
+\cmd{bands\_fit.py} can be a member, mixed freely: DFT folders of any code (gapped members use the window
+objective, metallic ones the metal objective, in the same fit) and structure + image/CSV + INI members.
 
 \begin{lstlisting}[style=ini]
 n_pairs: 1
-gap_weight: 0.35
-reg_weight: 0.04
+objective_settings: {window_min: -2, window_max: 2}   # optional, [objective] keys
+basis_add: "S:d"                                      # optional; basis_dz: "S:p" too
+defaults:                       # applied to every DFT member (a member may override them)
+  dft_code: vasp
+  spin_channel: average         # up | down | average
+  semicore: auto
+  metallic: auto                # auto | true | false
 systems:
-  - {name: train_MoS2, role: train, structure: train_MoS2/structure.cif,
-     settings: train_MoS2/file.ini, reference: train_MoS2/bands.png, mode: auto}
-  - {name: train_WSe2, role: train, structure: train_WSe2/structure.cif,
-     settings: train_WSe2/file.ini, reference: train_WSe2/bands.png, mode: auto}
-  - {name: test_WS2,   role: test,  structure: test_WS2/structure.cif,
-     settings: test_WS2/file.ini,   reference: test_WS2/bands.png,   mode: auto}
+  - {name: 1L_TiS2, dft_dir: ../1L_PBE_1T_TiS2_Bands}
+  - {name: 3L_TiS2, dft_dir: ../3L_PBE_1T_TiS2_Bands, weight: 2}
+  - {name: anatase_TiS2, dft_dir: ../bulk_PBE_anatase_TiS2_Bands}
+  - {name: rutile_TiS2, dft_dir: ../bulk_PBE_rutilo_TiS2_Bands, role: test}
+  - {name: img_MoS2, structure: MoS2.cif, settings: MoS2.ini, reference: MoS2.png, mode: auto}
 \end{lstlisting}
 
 \begin{lstlisting}[style=sh]
 python USER_WORKFLOW/family_fit.py family.yaml --validate-only
-python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir outputs/family
-python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400 --outdir outputs/family
+python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir out/family
+python USER_WORKFLOW/family_fit.py family.yaml --fit --optimizer cmaes --polish nelder-mead \
+  --budget 3000 --outdir out/family
+python USER_WORKFLOW/family_fit.py family.yaml --evaluate out/family/fit/fit.json --outdir out/eval
 \end{lstlisting}
 
-At least two training materials and one test material are required. Only the training references
-are prepared and optimized; one global table and one $K$ are fitted; only then are the test references
-opened and scored with \cmd{frozen\_transfer.py}. Test elements must appear in the training set (MoS$_2$
-+ WSe$_2$ cover Mo, W, S, Se; MoS$_2$ alone cannot be tested on WSe$_2$). All systems use the same
-\cmd{n\_pairs}. The older \cmd{parameter\_fitter/fit\_shared.py} is a separate expert prototype that
-traces all orbitals and does not accept an ordinary two-band image.
+DFT members take, per member, under \cmd{defaults:} or in the \cmd{[reference]} section of a member's
+\cmd{settings:} INI: \cmd{dft\_dir}, \cmd{dft\_code}, \cmd{dft\_file}, \cmd{valence\_bands},
+\cmd{spin\_channel}, \cmd{fermi}, \cmd{metallic}, \cmd{semicore}, \cmd{dimension}, \cmd{points\_per\_segment},
+\cmd{emin}, \cmd{emax}, an optional \cmd{structure} and \cmd{weight}. Global keys: \cmd{n\_pairs},
+\cmd{objective}, \cmd{objective\_settings}, \cmd{basis\_add}, \cmd{basis\_dz}, \cmd{start\_from}
+(+\cmd{start\_K}), \cmd{overlap\_radius}, \cmd{gap\_weight}, \cmd{reg\_weight}, \cmd{overlap\_min\_eig},
+\cmd{workers}. Options: every optimizer of \cmd{bands\_fit.py}, \cmd{--objective}, \cmd{--basis-add},
+\cmd{--basis-dz}, \cmd{--start-from}, \cmd{--workers} (members are computed in parallel), \cmd{--no-export}.
 
-% ================================================================ 9
+At least one training member is required; test members are optional (without them every error is a
+training error). Test references are read only after the vector is frozen, and their elements must appear
+in the training set; a test structure or DFT folder identical to a training one is refused. Outputs:
+\cmd{parameters/parameters\_huckel.dat} and \cmd{.txt} (the shared table and $K$), \cmd{fit/},
+\cmd{systems/<name>/} (comparison figures of every member and, for DFT members, the standard
+\cmd{fitting/} export with H(R), S(R)), \cmd{heldout/<name>/}, \cmd{family\_overview.png} (all members in one
+figure) and \cmd{family\_report.json}. The older \cmd{parameter\_fitter/fit\_shared.py} is a separate expert
+prototype that traces all orbitals.
+
 \section{Results of the original study}
 
 The main study fits six Ge/Sn chalcogenides with 2, 4, 6 and 8 matched bands against Materials Cloud
@@ -1116,6 +1167,11 @@ cif, input\_file & structure (any format of section~\ref{sec:structure}) and INI
 --dft-dir, --dft-code & raw DFT band data as reference (section~\ref{sec:dft}) \\
 --dft-file, --valence-bands & band file to use; occupied DFT bands \\
 --dimension & periodic dimension of a DFT reference \\
+--spin-channel & \cmd{up}, \cmd{down} or \cmd{average} for a spin-polarized DFT run \\
+--semicore & lowest DFT bands to drop: \cmd{auto} (default), $N$ or 0 \\
+--objective & \cmd{frontier}, \cmd{window} (DFT default) or \cmd{metal} \\
+--basis-add, --basis-dz & extra shells (\cmd{"S:d"}, \cmd{auto}); double-zeta shells (\cmd{"S:p"}) \\
+--start-from & start (and centre the bounds) at an earlier fit \\
 --fitting-dir & folder of the standard fit outputs (default \cmd{OUTDIR/fitting}) \\
 --image, --png & reference image or CSV instead of \cmd{[reference] image} \\
 --pairs \{1,2,3,4\} & valence and conduction bands on \emph{each} side \\
@@ -1161,6 +1217,9 @@ CSV \cmd{header must be exactly} & use \cmd{x,band\_1,band\_2,...}, energies asc
 \cmd{Invalid or out-of-range plot box} & \cmd{--bbox} must lie inside the oriented, normalized image \\
 \cmd{needs scikit-learn} / \cmd{needs the cma package} & install the optional package or use the conda environment \\
 3D crystal treated as 2D & set \cmd{dimension = 3}; refit fits made before the periodicity fix \\
+\cmd{Spin-polarized reference with different up/down bands} & fit one channel (\cmd{--spin-channel up/down}) or, for a spurious small moment, \cmd{average} \\
+\cmd{ignores the second exponent of the double-zeta shells} & \cmd{YAEHMOP\_BIND} is the original program: use the fork (\cmd{install.sh --build-yaehmop}) \\
+spurious flat bands in a slab fit & an atom wrapped across the vacuum; fixed automatically now, refit older slab fits \\
 \bottomrule
 \end{tabularx}
 \end{center}

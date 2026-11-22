@@ -388,3 +388,26 @@ def extend_basis(params, add):
             if orb not in p[el] or float(p[el][orb].get("zeta1", 0)) <= 0:
                 p[el][orb] = extra_shell(el, orb, p[el])
     return p
+
+
+def make_double_zeta(params, spec, zeta2_factor=0.5, ratio=0.3):
+    """Turn single-zeta shells into contracted double-zeta ones (returns a copy).
+
+    spec: "S:p Te:p" or {"S": ["p"]}. The existing exponent stays as the inner (contracted)
+    function; a diffuse tail zeta2 = zeta2_factor * zeta1 with weight c2/c1 = ratio is added,
+    and both are fitted. p shells need a YAeHMOP with double-zeta p (ac-dias/yaehmop fork);
+    d and f shells work with the original program."""
+    import copy
+    p = copy.deepcopy(params)
+    for el, orbs in parse_basis_add(spec).items() if spec else []:
+        if el not in p:
+            continue
+        for orb in orbs:
+            if orb not in p[el] or float(p[el][orb].get("zeta1", 0)) <= 0:
+                raise ValueError(f"basis_dz {el}:{orb}: {el} has no {orb} shell")
+            o = p[el][orb]
+            if int(o["nzeta"]) == 2:
+                continue
+            o.update(nzeta=2, zeta2=max(0.5, zeta2_factor * float(o["zeta1"])), c1=1.0, c2=float(ratio))
+    return p
+

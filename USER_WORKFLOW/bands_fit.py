@@ -32,7 +32,7 @@ from global_optimizers import GLOBAL_METHODS,POLISH_METHODS
 from structure_io import (read_structure,resolved_structure_format,structure_label,
    STRUCTURE_FORMAT_CHOICES,STRUCTURE_FORMAT_HELP)
 from dft_bands import (DFT_CODES,read_dft_bands,save_reference,load_reference,
-   eht_reference,detect_periodic_dim,normalize_code)
+   eht_reference,detect_periodic_dim,normalize_code,drop_lowest_bands,semicore_band_count)
 
 def csv_path(x,base):
     p=Path(os.path.expandvars(os.path.expanduser(x)))
@@ -352,7 +352,8 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     import shutil,tempfile,scipy.linalg as sl
     from yaehmop_generic import real_space_matrices,gamma_mesh,ORBITAL_LM
     bind,_=resolve_yaehmop_assets()
-    atoms=read_structure(structure,sfmt);syms=atoms.get_chemical_symbols()
+    from yaehmop_generic import contiguous_along_vacuum
+    atoms=contiguous_along_vacuum(read_structure(structure,sfmt),dim);syms=atoms.get_chemical_symbols()
     params=subset_for_elements(parse_parameter_table(parameters),list(dict.fromkeys(syms)))
     nelec=valence_electrons(params,syms);nocc=nelec//2
     images=overlap_images_for(dim,radius)
@@ -523,7 +524,8 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
         if (fdir/old_file).exists():(fdir/old_file).unlink()
     # The structure used (exact cell of huckel-NP.dat), so that fitting/ is self-contained
     from ase.io import write as ase_write
-    ase_write(fdir/"POSCAR",read_structure(structure,sfmt),format="vasp",direct=True)
+    from yaehmop_generic import contiguous_along_vacuum
+    ase_write(fdir/"POSCAR",contiguous_along_vacuum(read_structure(structure,sfmt),dim),format="vasp",direct=True)
     info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index,energy_zero)
     summary=dict(summary,structure_in_fitting="POSCAR",
                  tight_binding_files=dict(info,files=["huckel-NP.dat","basis_set-NP","orbitals.dat",
@@ -696,6 +698,82 @@ def objective_config(args,config,default):
     add=args.basis_add or fit.get("basis_add",fallback="")
     return name,sett,parse_basis_add(add)
 
+def _is_metal_refusal(exc):
+    t=str(exc)
+    return ("No positive gap" in t or "cross the Fermi level" in t or "metallic" in t.lower()
+            or "Occupations change" in t)
+
+def load_dft_reference(dft_dir,code,refdir,*,name,dft_file=None,valence_bands=None,spin_channel=None,
+                       metallic=False,fermi=None,semicore="auto",structure=None,structure_format=None,
+                       dimension=None,step=20,pairs=1):
+    """Read a DFT band folder and prepare everything a fit needs (shared by bands_fit and family_fit).
+
+    metallic: True, False or "auto" (gapped if the reader finds a positive gap, else metal).
+    semicore: "auto" (drop (NELECT_DFT - n_EHT)/2 lowest bands when the electron count is known),
+    an integer, or 0/"none". Returns a dict with ref, er, info, entry, cif, sfmt, dim."""
+    code=normalize_code(code)
+    dft_dir=Path(dft_dir);refdir=Path(refdir);refdir.mkdir(parents=True,exist_ok=True)
+    if isinstance(metallic,str):
+        m=metallic.strip().lower()
+        metallic="auto" if m=="auto" else m in ("1","true","yes","metal","on")
+    kw=dict(spin_channel=spin_channel,fermi=fermi)
+    if metallic=="auto":
+        try:
+            ref=read_dft_bands(dft_dir,code,dft_file,valence_bands,metallic=False,**kw);metallic=False
+        except ValueError as exc:
+            if not _is_metal_refusal(exc):raise
+            ref=read_dft_bands(dft_dir,code,dft_file,None,metallic=True,**kw);metallic=True
+            ref.notes.append("no gap on the path: treated as a metal (objective 'metal')")
+    else:
+        ref=read_dft_bands(dft_dir,code,dft_file,valence_bands,metallic=bool(metallic),**kw)
+    if structure is not None:
+        cif=Path(structure).resolve()
+        sfmt=resolved_structure_format(cif,structure_format)
+        atoms=read_structure(cif,sfmt)
+        if not np.allclose(np.asarray(atoms.cell),np.asarray(ref.atoms.cell),atol=1e-3):
+            raise ValueError("The structure file has a different cell from the DFT band calculation; "
+                             "omit it to use the DFT structure")
+    else:
+        from ase.io import write
+        atoms=ref.atoms
+        cif=refdir/"POSCAR";write(cif,ref.atoms,format="vasp",direct=True);sfmt="vasp"
+    # semicore states of the DFT potential (e.g. Ti 3s3p of Ti_sv) are absent from the EHT basis
+    sc=str(semicore if semicore is not None else "auto").strip().lower()
+    nskip=0
+    if sc=="auto":
+        _,table=resolve_yaehmop_assets()
+        syms=atoms.get_chemical_symbols()
+        try:
+            params=subset_for_elements(parse_parameter_table(table),list(dict.fromkeys(syms)))
+            nskip=semicore_band_count(ref,valence_electrons(params,syms))
+        except (ValueError,KeyError) as exc:
+            ref.notes.append(f"semicore auto: nothing dropped ({exc})")
+    elif sc not in ("","0","none","no","false"):
+        nskip=int(sc)
+    if nskip:drop_lowest_bands(ref,nskip)
+    dim=dimension;dim_source="user"
+    if dim is None:
+        dim=detect_periodic_dim(ref.atoms);dim_source="vacuum detection"
+    npz=save_reference(ref,refdir/"reference_bands.npz")
+    er=eht_reference(ref,step,dim)
+    plot_dft_preview(ref,er,pairs,refdir/"dft_bands_preview.png",name)
+    info=dict(dft_dir=str(dft_dir.resolve()),code=code,files=ref.files,notes=ref.notes,
+              formula=ref.atoms.get_chemical_formula(),n_kpoints=len(ref.kfrac),
+              n_bands=int(ref.energies.shape[1]),occupied_bands=ref.nocc,occupied_from=ref.nocc_source,
+              semicore_bands_dropped=int(ref.skipped_bands),fermi_eV=ref.fermi,
+              gap_on_path_eV=None if metallic else float(ref.energies[:,ref.nocc].min()-ref.energies[:,ref.nocc-1].max()),
+              midgap_eV=None if metallic else float(.5*(ref.energies[:,ref.nocc].min()+ref.energies[:,ref.nocc-1].max())),
+              metallic=bool(metallic),energy_zero_eV=ref.fermi if metallic else None,
+              spin_channel=ref.spin_channel,
+              periodic_dim=dim,periodic_dim_from=dim_source,yaehmop_path=[l for _,l in er.ticks],
+              yaehmop_points_per_line=step,structure=str(cif))
+    (refdir/"dft_reference.json").write_text(json.dumps(info,indent=2)+"\n")
+    entry={"name":name,"role":"train","weight":1.0,"structure":str(cif),"structure_format":sfmt,
+           "reference":str(npz),"reference_format":"dft","point_dim":dim,"n_pairs":pairs,
+           "points_per_line":step}
+    if metallic:entry["metallic"]=True
+    return dict(ref=ref,er=er,info=info,entry=entry,cif=cif,sfmt=sfmt,dim=dim,npz=npz,metallic=bool(metallic))
+
 def dft_main(args,parser,config,inputs,dft_dir):
     """Fit (or evaluate) EHT parameters against raw DFT eigenvalues of a folder."""
     ref_cfg=config["reference"];fit=config["fit"];bp=config["band_path"]
@@ -712,51 +790,23 @@ def dft_main(args,parser,config,inputs,dft_dir):
     spin_ch=args.spin_channel or ref_cfg.get("spin_channel",fallback=None)
     metallic=(args.objective or fit.get("objective",fallback="window"))=="metal"
     fermi_user=ref_cfg.getfloat("fermi",fallback=None)
-    try:
-        ref=read_dft_bands(dft_dir,code,dft_file,vb,spin_channel=spin_ch,metallic=metallic,fermi=fermi_user)
-    except (ValueError,FileNotFoundError) as exc:
-        parser.error(f"DFT folder {dft_dir}: {exc}")
-    # Structure: the DFT one, or the user's file if it has the same cell
-    if args.cif is not None:
-        cif=args.cif.resolve()
-        sfmt=resolved_structure_format(cif,args.structure_format)
-        atoms=read_structure(cif,sfmt)
-        if not np.allclose(np.asarray(atoms.cell),np.asarray(ref.atoms.cell),atol=1e-3):
-            parser.error("The structure file has a different cell from the DFT band calculation; "
-                         "omit it to use the DFT structure")
-    else:
-        from ase.io import write
-        cif=refdir/"POSCAR";write(cif,ref.atoms,format="vasp",direct=True);sfmt="vasp"
+    semicore=args.semicore or ref_cfg.get("semicore",fallback="auto")
     dim=args.dimension or (bp.getint("dimension") if bp.get("dimension") else None)
-    dim_source="user"
-    if dim is None:
-        dim=detect_periodic_dim(ref.atoms);dim_source="vacuum detection"
     step=bp.getint("points_per_segment",fallback=20)
     name=args.name or fit.get("name",fallback=None) or Path(dft_dir).name
     if any(c in name for c in ("/","\\","..")):parser.error("name must not contain slash or '..'")
-    npz=save_reference(ref,refdir/"reference_bands.npz")
-    er=eht_reference(ref,step,dim)
-    plot_dft_preview(ref,er,pairs,refdir/"dft_bands_preview.png",name)
-    info=dict(dft_dir=str(Path(dft_dir).resolve()),code=code,files=ref.files,notes=ref.notes,
-              formula=ref.atoms.get_chemical_formula(),n_kpoints=len(ref.kfrac),
-              n_bands=int(ref.energies.shape[1]),occupied_bands=ref.nocc,occupied_from=ref.nocc_source,
-              fermi_eV=ref.fermi,
-              gap_on_path_eV=None if metallic else float(ref.energies[:,ref.nocc].min()-ref.energies[:,ref.nocc-1].max()),
-              midgap_eV=None if metallic else float(.5*(ref.energies[:,ref.nocc].min()+ref.energies[:,ref.nocc-1].max())),
-              metallic=metallic,energy_zero_eV=ref.fermi if metallic else None,
-              spin_channel=ref.spin_channel,
-              periodic_dim=dim,periodic_dim_from=dim_source,yaehmop_path=[l for _,l in er.ticks],
-              yaehmop_points_per_line=step,structure=str(cif))
-    (refdir/"dft_reference.json").write_text(json.dumps(info,indent=2)+"\n")
+    try:
+        L=load_dft_reference(dft_dir,code,refdir,name=name,dft_file=dft_file,valence_bands=vb,
+            spin_channel=spin_ch,metallic=metallic,fermi=fermi_user,semicore=semicore,
+            structure=args.cif,structure_format=args.structure_format,dimension=dim,step=step,pairs=pairs)
+    except (ValueError,FileNotFoundError) as exc:
+        parser.error(f"DFT folder {dft_dir}: {exc}")
+    ref,er,info,entry,cif,sfmt,dim,npz=(L[k] for k in ("ref","er","info","entry","cif","sfmt","dim","npz"))
     print("DFT_REFERENCE",json.dumps(dict((k,info[k]) for k in ("code","formula","n_kpoints","n_bands",
           "occupied_bands","gap_on_path_eV","periodic_dim","yaehmop_path"))),flush=True)
     for note in ref.notes:print("NOTE",note,flush=True)
     radius=args.overlap_radius or fit.getint("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS)
     if radius not in range(1,9):parser.error("--overlap-radius must be in [1,8]")
-    entry={"name":name,"role":"train","weight":1.0,"structure":str(cif),"structure_format":sfmt,
-           "reference":str(npz),"reference_format":"dft","point_dim":dim,"n_pairs":pairs,
-           "points_per_line":step}
-    if metallic:entry["metallic"]=True
     window=(ref_cfg.getfloat("emin",fallback=-6.),ref_cfg.getfloat("emax",fallback=6.))
     if args.validate_only or args.prepare_only:
         print("PREPARED_ONLY: review",refdir/"dft_bands_preview.png","before fitting.")
@@ -798,6 +848,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
          "gap_weight":float(fit.get("gap_weight",".35")),"reg_weight":float(fit.get("reg_weight",".04")),
          "overlap_min_eig":float(fit.get("overlap_min_eig","1e-3")),
          "objective":obj,"objective_settings":obj_set,"basis_add":basis_add,
+         "basis_dz":args.basis_dz or fit.get("basis_dz",fallback=""),
          "systems":[entry]}
     start=args.start_from or (fit.get("start_from") and csv_path(fit["start_from"],inputs.parent))
     if start:
@@ -895,6 +946,9 @@ def main():
     parser.add_argument("--basis-add",default=None,
                         help="extra EHT shells, e.g. 'S:d Zn:d H:p' ([fit] basis_add); started from "
                              "estimates and fitted")
+    parser.add_argument("--basis-dz",default=None,
+                        help="shells made double-zeta (inner exponent + fitted diffuse tail), e.g. \"S:p Te:p\" "
+                             "([fit] basis_dz); s/p need a bind with double-zeta p (ac-dias/yaehmop fork)")
     parser.add_argument("--start-from",type=Path,default=None,
                         help="fitting/ folder of an earlier fit: start from its parameters (and basis), with "
                              "the search bounds centred there ([fit] start_from)")
@@ -910,8 +964,12 @@ def main():
                      "([reference] dft_file)")
     dft.add_argument("--valence-bands",type=int,help="occupied DFT bands, if the automatic count is wrong "
                      "([reference] valence_bands)")
-    dft.add_argument("--spin-channel",choices=("up","down"),help="one channel of a collinear spin-polarized run "
-                     "([reference] spin_channel); fit each channel, then join them with spin_combine.py")
+    dft.add_argument("--spin-channel",choices=("up","down","average"),help="one channel of a collinear spin-polarized run "
+                     "([reference] spin_channel); fit each channel, then join them with spin_combine.py; "
+                     "average = mean of both channels (spurious tiny magnetization)")
+    dft.add_argument("--semicore",help="lowest DFT bands to drop (semicore states absent from the EHT basis): "
+                     "auto (default: (NELECT - EHT electrons)/2 when known), an integer, or 0 "
+                     "([reference] semicore)")
     dft.add_argument("--dimension",type=int,choices=(1,2,3),help="periodic dimension for a DFT reference "
                      "(default: [band_path] dimension, else detected from the vacuum)")
     args=parser.parse_args()

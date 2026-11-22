@@ -27,7 +27,7 @@ python3 quick.py
 # 2) Get an explanatory recommendation without any optimization
 python USER_WORKFLOW/strategy_advisor.py --cif STRUCTURE.cif --reference BANDS.png   --goal direct --electronic semiconductor --bands auto
 
-# 3) Fit directly (requires separately installed YAeHMOP)
+# 3) Fit directly (requires YAeHMOP: ./install.sh --build-yaehmop builds the ac-dias/yaehmop fork)
 python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini --pairs 1 --budget 400 --outdir outputs/source
 
 # 4) Apply that exact vector + K to ANOTHER system, without refitting
@@ -39,7 +39,19 @@ python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir outputs/f
 python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400 --outdir outputs/family
 ~~~
 
-The last three physical operations require an authorized original YAeHMOP bind executable and atomic parameter table set with YAEHMOP_BIND / YAEHMOP_PARAM_FILE. The example paths are placeholders, not bundled reference bands. **Direct** sees the target in fitting; **frozen evaluation** does not change parameters; **family fitting** excludes a whole held-out target until after the shared fit. These image commands need **gapped, nonmagnetic, spinless** references. Numerical DFT references (`--dft-dir`) also accept spin-polarized runs (`--spin-channel`), metals (`objective = metal`) and spin-orbit fits (`soc_fit.py`); see [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md). Do not claim Fermi-surface accuracy from a 1D PNG.
+The last three physical operations require a YAeHMOP `bind` executable, preferably the [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) fork (`./install.sh --build-yaehmop`), and an atomic parameter table set with YAEHMOP_BIND / YAEHMOP_PARAM_FILE. The example paths are placeholders, not bundled reference bands. **Direct** sees the target in fitting; **frozen evaluation** does not change parameters; **family fitting** excludes a whole held-out target until after the shared fit. These image commands need **gapped, nonmagnetic, spinless** references. Numerical DFT references (`--dft-dir`) also accept spin-polarized runs (`--spin-channel up|down|average`), metals (`objective = metal`), semicore removal (`--semicore auto`) and spin-orbit fits (`soc_fit.py`); see [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md). `family_fit.py` accepts every one of these references (DFT folders of any code, gapped and metallic mixed, images, CSV) as members of one shared fit; see [docs/FAMILY_FIT.md](docs/FAMILY_FIT.md). Do not claim Fermi-surface accuracy from a 1D PNG.
+
+## YAeHMOP solver: the ac-dias/yaehmop fork
+
+> **YAeHMOP solver: use our fork [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) for fitting.**
+> `./install.sh --build-yaehmop` compiles it and stores it in the conda environment. The fork is the
+> original YAeHMOP plus **double-zeta p orbitals** (required by `--basis-dz X:p`, e.g. interlayer
+> coupling in layered materials), **spin-polarized runs**, **spin–orbit coupling**, a configurable K of the
+> diagonal term and bug fixes; every change is documented in its
+> [`tex/advances_in_yaehmop.pdf`](https://github.com/ac-dias/yaehmop/blob/master/tex/advances_in_yaehmop.pdf).
+> With single-zeta tables it gives exactly the bands of the original program (|ΔE| = 0), so results
+> obtained with upstream YAeHMOP stay valid. Upstream [greglandrum/yaehmop](https://github.com/greglandrum/yaehmop)
+> silently ignores a second p exponent; BandFit detects this and stops instead of fitting nonsense.
 
 ## Graphical interface
 
@@ -102,7 +114,7 @@ python USER_WORKFLOW/bands_fit.py \
   --outdir outputs/my_material_full
 ~~~
 
-**Before step 2:** install YAeHMOP separately and set **YAEHMOP_BIND** and **YAEHMOP_PARAM_FILE** to your native solver/table ([installation](docs/INSTALLATION.md)); inspect **outputs/my_material/reference_prepared/extraction_preview.png** to verify curve extraction. Expected fit outputs: **bands_comparison.png/.pdf/.csv**, **fit/param_best_native.dat**, **fit/fit.json** and **run_summary.json**. The full recomputation creates **bands_full.png/.csv/.npz**.
+**Before step 2:** install YAeHMOP from the [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) fork (`./install.sh --build-yaehmop`) or set **YAEHMOP_BIND** and **YAEHMOP_PARAM_FILE** to an existing build of it ([installation](docs/INSTALLATION.md)); inspect **outputs/my_material/reference_prepared/extraction_preview.png** to verify curve extraction. Expected fit outputs: **bands_comparison.png/.pdf/.csv**, **fit/param_best_native.dat**, **fit/fit.json** and **run_summary.json**. The full recomputation creates **bands_full.png/.csv/.npz**.
 
 **PNG pipeline:** [inspect → select visible curves → standardize to bands_N_layers.png → numerical CSV + QA](docs/FIT_YOUR_MATERIAL.md#2-inspect-the-png-and-prepare-the-band-reference-fast-no-solver). PNG/JPEG/TIFF/WebP and CSV are supported; user-reported image axes/paths must match the actual DFT reference. **--image** and **--png** are both valid aliases. Use **--pairs 2/3/4** only if the reference really contains 4/6/8 identifiable bands. Complete [flags](docs/CLI_REFERENCE.md).
 
@@ -198,7 +210,7 @@ Every accepted raster is normalized to `normalized_source.png`, validated, and c
 
 ## Actually fit a new crystal (optional, runs local YAeHMOP)
 
-To optimize parameters you must separately install an authorized [YAeHMOP `bind` executable](https://github.com/greglandrum/yaehmop) and atomic table. No native binary or DFT dataset is bundled.
+To optimize parameters you need a YAeHMOP `bind` executable and atomic table: `./install.sh --build-yaehmop` compiles the fork [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (double-zeta p, spin, SOC; same bands as [upstream](https://github.com/greglandrum/yaehmop) for single-zeta tables). No native binary or DFT dataset is bundled.
 
 ```bash
 export YAEHMOP_BIND=/absolute/path/to/bind
@@ -213,4 +225,4 @@ python3 USER_WORKFLOW/bands_fit.py material.cif config.ini \
 
 **More:** [Installation](docs/INSTALLATION.md) · [All CLI options](docs/CLI_REFERENCE.md) · [Full example catalog](docs/EXAMPLES.md) · [Scientific limitations](docs/SCIENTIFIC_SCOPE.md) · [Experimental p-DZ7 source patch](experimental/README.md) · [Contributing](CONTRIBUTING.md).
 
-**License:** MIT for this frontend; upstream YAeHMOP and external PBE source data retain their own licenses. Saved physical EHT outputs and paper figures are provided for fast research review without third-party raw DFT redistributions.
+**License:** MIT for this frontend; YAeHMOP (upstream and the ac-dias/yaehmop fork, BSD 2-clause) and external PBE source data retain their own licenses. Saved physical EHT outputs and paper figures are provided for fast research review without third-party raw DFT redistributions.

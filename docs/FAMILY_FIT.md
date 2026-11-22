@@ -1,6 +1,60 @@
-# Joint fitting and frozen whole-material transfer — 2/4/6/8 frontier bands
+# Joint (family) fitting: one parameter table for several systems
 
-**This is a physical multi-system YAeHMOP workflow.** It optimizes **one** table of shared elemental onsite/radial parameters and **one** common Wolfsberg–Helmholtz K using the existing multi-system sparse-window backend. It does not average separately optimized tables or copy fit parameters from each new target. It requires real gapped nonmagnetic DFT reference bands and an installed native YAeHMOP engine.
+**This is a physical multi-system YAeHMOP workflow.** It optimizes **one** table of shared elemental onsite/radial parameters and **one** common Wolfsberg–Helmholtz K using the multi-system backend (`parameter_fitter/fit_sparse_window.py`). It does not average separately optimized tables. Typical uses: one table per chemical composition valid for several polymorphs and thicknesses (monolayer to bulk), or a table shared by a chemical family, with optional held-out test systems.
+
+## Every reference of bands_fit.py, mixed freely
+
+Each member of `systems:` is either
+
+* a **DFT band folder** (`dft_dir`, `dft_code`: vasp, qe, siesta, aims, wannier90), read exactly as by `bands_fit.py --dft-dir`. Gapped members use the band-window objective, metallic members the metal objective (bands aligned at E_F), in the same fit. Per member, or once for all in `defaults:`, or in the `[reference]` section of a member's `settings:` INI:
+
+  | key | meaning |
+  |---|---|
+  | `metallic` | `auto` (default: metal when the reader finds no gap), `true`, `false` |
+  | `spin_channel` | `up`, `down`, or `average` (mean of both channels, for a spurious small magnetization) |
+  | `semicore` | `auto` (default): drop (NELECT_DFT − n_EHT)/2 lowest bands, e.g. Ti 3s3p of a `Ti_sv` PAW potential; an integer; or `0` |
+  | `fermi`, `valence_bands`, `dft_file` | as in `bands_fit.py` |
+  | `dimension`, `points_per_segment` | periodic dimension (default: vacuum detection) and YAeHMOP points per line |
+  | `emin`, `emax` | energy range of the full comparison figure |
+  | `structure`, `structure_format` | optional; default the structure of the DFT run |
+  | `weight` | weight of the member in the shared objective |
+
+* or a **structure + band image/CSV + INI** (`structure`, `settings`, `reference`, `mode`, `bbox`, `colors`), as before (gapped, 2/4/6/8 frontier bands).
+
+Global keys: `n_pairs`, `objective` (default: `metal` if a training member is metallic, `window` for DFT, `frontier` for images), `objective_settings` (the `[objective]` keys of the window/metal objectives), `basis_add`, `basis_dz` (double-zeta shells such as `S:p`, see [DFT_REFERENCE.md](DFT_REFERENCE.md); p needs the `bind` of github.com/ac-dias/yaehmop), `start_from` (+ `start_K`), `overlap_radius`, `gap_weight`, `reg_weight`, `overlap_min_eig`, `workers`.
+
+Example: one table for TiS₂ in seven structures (VASP, PBE, spin-polarized runs with ~0 magnetization, Ti_sv):
+
+~~~yaml
+n_pairs: 1
+defaults:
+  dft_code: vasp
+  spin_channel: average
+  semicore: auto
+  metallic: auto
+systems:
+  - {name: 1L_1T_TiS2, dft_dir: ../1L_PBE_1T_TiS2_Bands}
+  - {name: 2L_1T_TiS2, dft_dir: ../2L_PBE_1T_TiS2_Bands}
+  - {name: bulk_anatase_TiS2, dft_dir: ../bulk_PBE_anatase_TiS2_Bands}
+  - {name: bulk_rutilo_TiS2, dft_dir: ../bulk_PBE_rutilo_TiS2_Bands, role: test}
+~~~
+
+~~~bash
+python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir out/TiS2     # read, previews, no solver
+python USER_WORKFLOW/family_fit.py family.yaml --fit --optimizer cmaes --polish nelder-mead \
+       --budget 3000 --outdir out/TiS2
+python USER_WORKFLOW/family_fit.py family.yaml --evaluate out/TiS2/fit/fit.json --outdir out/TiS2_eval
+~~~
+
+Options: every optimizer of `bands_fit.py` (`--optimizer`, `--polish`, `--budget`, `--seed`), `--objective`, `--basis-add`, `--basis-dz`, `--start-from`, `--workers` (members are computed in parallel), `--no-export`, `--evaluate FIT_JSON` (no fit: score every member with an earlier table).
+
+Outputs: `fit/` (fit.json, param_best_native.dat, history), `parameters/parameters_huckel.dat` + `.txt` (the shared table and K), `systems/<name>/` with the comparison figures of every member (DFT blue, EHT red dashed) and, for DFT members, the standard `fitting/` export (H(R), S(R) in WanTiBEXOS format, POSCAR), `heldout/<name>/` for test members, `family_overview.png` (all members in one figure) and `family_report.json` (per-member errors, roles, hashes).
+
+At least one training member is required; test members are optional (without them every reported error is a training error). Test DFT folders are read only after the shared vector is frozen.
+
+Slab references computed with a bulk k path (Γ–A, L–M, K–H along the vacuum direction) are handled: segments with zero length in the periodic directions are dropped.
+
+## Image/CSV members
 
 ## Quick preparation
 
@@ -145,4 +199,4 @@ n_pairs: 1 means 1V+1C; n_pairs: 2 means 2V+2C; 3 and 4 likewise. All training s
 - Retrospective evaluation: if the researcher has inspected/used the test crystal in earlier design, the test is *not* prospectively blind even when the code enforces the current exclusion.
 - Re-adaptation: fitting the test target afterward is another **direct calibration**, not the same frozen transfer measurement.
 
-**Limitations:** this public workflow is for positively gapped spinless semiconductors. It is not a general-purpose 1T-metal Fermi surface fitter, not an SOC/magnetic band tracker, and it does not select a model family automatically. For those studies, the separate P27/P28 research protocols are documented scientifically but not made into unsupported stock-YAeHMOP flags.
+**Limitations:** image/CSV members must be gapped spinless references. Metallic and spin-polarized references are supported only as DFT members (metal objective, one spin channel or the channel mean); SOC is not part of the family fit (fit SOC afterwards with `soc_fit.py`).

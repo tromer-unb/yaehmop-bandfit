@@ -17,7 +17,7 @@ These numerical statements document research scope; **this GitHub repository doe
 
 ## Important implementation distinctions
 
-- Original stock YAeHMOP does not actually use second 2p Slater radial exponents/coefficients for carbon; implementing physical 2p double-zeta requires a separate audited native patch. The public frontend here uses the original YAeHMOP solver and **does not silently patch it**.
+- Original stock YAeHMOP does not actually use second 2p Slater radial exponents/coefficients for carbon; implementing physical 2p double-zeta requires a separate audited native patch. This patch is now part of the fork [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (commit 742719c, for any element's p shell), which `install.sh --build-yaehmop` compiles; `basis_dz = X:p` uses it, and band-fit refuses a `bind` that ignores the second exponent.
 - The Shi one-pz carbon tight-binding model is a **model surrogate calibrated to HSE06**, not independently calculated HSE06 band energies.
 - The P5 raster-to-band objective imposes a positive-frontier-gap gate (>about 0.02 eV). This implementation is not a ready-to-use Dirac crossing fitter for ideal graphene.
 - Carbon 3D recalculation must use three actual periodic vectors and three active periodic overlap directions. It is explicitly implemented in the period-aware writer in this repository, but that does not establish a particular PBE reference or publication-grade convergence.

@@ -31,7 +31,7 @@ No lugar do CIF pode ser usado o arquivo de estrutura do **VASP** (POSCAR/CONTCA
 
 Edite **inputs/MoS2/file.ini**. Ele deve conter os limites de energia da sua imagem (**emin**, **emax**), **a trajetória real no espaço recíproco** do seu cálculo DFT, os rótulos e **n_pairs**. O template usa Γ–M–K–Γ e −6/+6 eV **como exemplo, não como informação determinada automaticamente de todo CIF**.
 
-Para calcular espectros EHT de verdade, instale o **YAeHMOP original** separadamente e indique seus próprios caminhos:
+Para calcular espectros EHT de verdade, use o **nosso fork do YAeHMOP, [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop)**: é ele que deve ser usado no fitting. `./install.sh --build-yaehmop` compila o fork e guarda o caminho no ambiente conda. O fork é o YAeHMOP original mais orbitais p double-zeta (necessários para `--basis-dz X:p`, por exemplo o acoplamento entre camadas de materiais lamelares), spin polarizado, acoplamento spin-órbita e correções; com tabelas single-zeta dá exatamente as bandas do original. O YAeHMOP original ignora sem aviso o segundo expoente p, e o BandFit para com erro nesse caso. Para usar uma compilação já existente, indique os caminhos:
 
 ~~~bash
 export YAEHMOP_BIND=/caminho/para/yaehmop/bind

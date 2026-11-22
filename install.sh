@@ -6,8 +6,10 @@
 #   --env NAME              conda environment name (default: yaehmop-bandfit)
 #   --yaehmop-bind EXE      existing YAeHMOP bind executable        -> stored in the environment
 #   --yaehmop-params FILE   existing YAeHMOP eht_parms.dat          -> stored in the environment
-#   --build-yaehmop         download and compile YAeHMOP into the environment (bind + eht_parms.dat)
-#   --yaehmop-ref REF       YAeHMOP git commit/tag for --build-yaehmop (default: 4ded45b, the tested one)
+#   --build-yaehmop         download and compile YAeHMOP into the environment (bind + eht_parms.dat),
+#                           from the fork github.com/ac-dias/yaehmop (double-zeta p, spin, SOC)
+#   --yaehmop-repo URL      git repository for --build-yaehmop (default: the ac-dias/yaehmop fork)
+#   --yaehmop-ref REF       git commit/tag for --build-yaehmop (default: 9d6d15f, the tested one)
 #   --tests                 run the test suite at the end
 #   -h, --help              this help
 #
@@ -19,12 +21,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_NAME="yaehmop-bandfit"
 BIND="" PARAMS=""
 BUILD_YAEHMOP=0
-YAEHMOP_REPO="https://github.com/greglandrum/yaehmop.git"
-YAEHMOP_REF="4ded45bb2bb7a2d38d2527c991debce9226a9066"
+# Fork of YAeHMOP with double-zeta p orbitals (needed by basis_dz = X:p), spin polarization and
+# SOC; with single-zeta tables it gives the same bands as the original program.
+YAEHMOP_REPO="https://github.com/ac-dias/yaehmop.git"
+YAEHMOP_REF="9d6d15f536003299a5bf538c9bf60bc049508347"
 YAEHMOP_SRC="$HERE/third_party/yaehmop"
 RUN_TESTS=0
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -33,6 +37,7 @@ while [ $# -gt 0 ]; do
     --yaehmop-params) PARAMS="$2"; shift 2 ;;
     --build-yaehmop) BUILD_YAEHMOP=1; shift ;;
     --yaehmop-ref) YAEHMOP_REF="$2"; shift 2 ;;
+    --yaehmop-repo) YAEHMOP_REPO="$2"; shift 2 ;;
     --tests) RUN_TESTS=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage; exit 2 ;;
@@ -91,6 +96,7 @@ if [ "$BUILD_YAEHMOP" = 1 ]; then
     mkdir -p "$(dirname "$YAEHMOP_SRC")"
     git clone -q "$YAEHMOP_REPO" "$YAEHMOP_SRC"
   fi
+  git -C "$YAEHMOP_SRC" remote set-url origin "$YAEHMOP_REPO"
   git -C "$YAEHMOP_SRC" fetch -q origin || true
   git -C "$YAEHMOP_SRC" checkout -q "$YAEHMOP_REF"
   PARM_DIR="$CONDA_PREFIX/share/yaehmop"
@@ -102,6 +108,7 @@ if [ "$BUILD_YAEHMOP" = 1 ]; then
   cmake -S "$YAEHMOP_SRC/tightbind" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_FLAGS="$CFLAGS_OLD_C" \
         -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
+        -DCMAKE_INSTALL_RPATH="$CONDA_PREFIX/lib" \
         -DUSE_BLAS_LAPACK=ON -DPARM_FILE_LOC="$PARM_DIR/eht_parms.dat" >/dev/null
   cmake --build "$BUILD" -- -j"$(nproc)" >/dev/null
   cmake --install "$BUILD" >/dev/null
@@ -126,6 +133,14 @@ if [ -n "$BIND" ] && [ -n "$PARAMS" ]; then
     echo "  bind works: $(grep -m1 Total_Energy "$T/h2.bind.out")"
   else
     echo "  WARNING: bind did not run correctly; see $T" >&2
+  fi
+  # double-zeta p (basis_dz = X:p) needs the fork: its .out lists such a shell as "2P DZ:"
+  printf 'C2\n\nGeometry\n2\n1 C 0 0 0\n2 C 0 0 1.30\n\nmolecular\n\ncharge\n0\n' > "$T/c2dz.bind"
+  printf 'C 6 4 1 2 s -21.4 1.625 0.0 1.0 0.0\nC 6 4 2 2 p -11.4 1.9 0.9 1.0 0.3\nEND\n' > "$T/c2dz.parms"
+  if "$BIND" "$T/c2dz.bind" "$T/c2dz.parms" >/dev/null 2>&1 && grep -q "P DZ:" "$T/c2dz.bind.out"; then
+    echo "  double-zeta p supported (basis_dz = X:p available)"
+  else
+    echo "  note: this bind has no double-zeta p; basis_dz = X:p will be refused (use --build-yaehmop)"
   fi
   [ -s "$T/h2.bind.out" ] && rm -rf "$T"
 else

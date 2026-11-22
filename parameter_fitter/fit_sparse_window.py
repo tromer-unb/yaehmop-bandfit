@@ -17,7 +17,7 @@ import argparse,csv,json,hashlib,sys
 import numpy as np,yaml
 from structure_io import read_structure,resolved_structure_format
 from dft_bands import load_reference,eht_reference
-from band_objective import WindowSettings,window_error,metal_error,extend_basis,parse_basis_add,OBJECTIVES
+from band_objective import WindowSettings,window_error,metal_error,extend_basis,parse_basis_add,make_double_zeta,OBJECTIVES
 from scipy.optimize import differential_evolution
 from fit_from_image import build_specs,apply_x,physical_ok,parse_points
 from fit_shared import valid_basis
@@ -229,6 +229,10 @@ class Fitter:
                     for orb in ("s","p","d","f"):
                         if orb in st[el]:
                             self.stockparams[el][orb]=dict(st[el][orb])
+        self.basis_dz=parse_basis_add(config.get("basis_dz")) or {}
+        if self.basis_dz:
+            if self.basis_dz=="auto":raise ValueError("basis_dz needs explicit shells, e.g. S:p")
+            self.stockparams=make_double_zeta(self.stockparams,self.basis_dz)
         self.objective_name=str(config.get("objective","frontier"))
         if self.objective_name not in OBJECTIVES:
             raise ValueError(f"objective must be one of {OBJECTIVES}")
@@ -245,8 +249,13 @@ class Fitter:
                 self.bounds[i]=(self.stock[i]-5.,self.stock[i]+5.)
         self.names=[f"{el}_{orb}_{key}".strip("_") for el,orb,key in self.specs]
         self.pairs=int(config.get("n_pairs",2))
-        if any(s.get("metal") for s in self.train) and self.objective_name!="metal":
-            raise ValueError("a metallic reference needs objective 'metal'")
+        # Metallic references always use the 'metal' objective; gapped DFT references in the
+        # same (family) fit use 'window' when the objective is 'window' or 'metal'.
+        if any(s.get("metal") for s in self.train) and self.objective_name=="frontier":
+            raise ValueError("a metallic reference needs objective 'metal' (or 'window' for mixed families)")
+        # systems are evaluated in parallel (each one is an independent YAeHMOP run)
+        import os
+        self.workers=max(1,int(config.get("workers",os.environ.get("BANDFIT_WORKERS",min(len(self.train),os.cpu_count() or 1)))))
         if any(s["n_pairs"]!=self.pairs for s in self.train):
             raise ValueError("All train systems must use same n_pairs")
         # H(R), S(R) must stay exportable: a new best candidate is accepted only if S(k) is
@@ -256,10 +265,29 @@ class Fitter:
         self.gap_w=float(config.get("gap_weight",.35))
         self.reg_w=float(config.get("reg_weight",.04))
         self.calls=0
+        if any(int(s[o].get("nzeta",1))==2 for s in self.stockparams.values() for o in ("s","p") if o in s):
+            self.check_double_zeta_sp()
         # live progress for monitors (band_fit_gui.py): call, loss, best loss so far
         self.best_loss=float("inf")
         self.progress=open(out/"progress.csv","w",buffering=1)
         self.progress.write("call,loss,best\n")
+    def check_double_zeta_sp(self):
+        """The original YAeHMOP reads only the first exponent of an s/p shell: refuse to fit
+        double-zeta s/p parameters with a binary that would silently ignore them."""
+        import copy
+        s=self.train[0];sz=copy.deepcopy(self.stockparams)
+        for el in sz.values():
+            for o in ("s","p"):
+                if o in el and int(el[o].get("nzeta",1))==2:el[o]["c2"]=0.0
+        dz=copy.deepcopy(self.stockparams)
+        for el in dz.values():
+            for o in ("s","p"):
+                if o in el and int(el[o].get("nzeta",1))==2:el[o].update(zeta2=max(.5,.5*el[o]["zeta1"]),c2=.5)
+        a=self.run(s,sz,1.75,"dzcheck_sz");b=self.run(s,dz,1.75,"dzcheck_dz")
+        if np.allclose(a,b,atol=1e-6):
+            raise RuntimeError(f"The YAeHMOP binary {self.bind} ignores the second exponent of s/p shells: "
+                               "double-zeta p (basis_dz) needs a bind with double-zeta p support "
+                               "(github.com/ac-dias/yaehmop, commit 742719c or later); set YAEHMOP_BIND to it")
     def log_progress(self,cost):
         self.best_loss=min(self.best_loss,cost)
         self.progress.write(f"{self.calls},{cost:.6g},{self.best_loss:.6g}\n")
@@ -304,8 +332,14 @@ class Fitter:
             if not physical_ok(params):raise ValueError("Invalid double-zeta parameter")
             values=[];weights=[]
             line=dict(K=float(K))
-            for s in self.train:
-                full=self.run(s,params,K,f"trial_{self.calls:07d}")
+            tag=f"trial_{self.calls:07d}"
+            if self.workers>1 and len(self.train)>1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(min(self.workers,len(self.train))) as pool:
+                    fulls=list(pool.map(lambda s:self.run(s,params,K,tag),self.train))
+            else:
+                fulls=[self.run(s,params,K,tag) for s in self.train]
+            for s,full in zip(self.train,fulls):
                 if s.get("metal"):
                     wm,_,_=metal_scores(full,s,self.wset)
                     values.append(wm["total"]);weights.append(s["weight"])
@@ -313,7 +347,7 @@ class Fitter:
                     line[s["name"]+"_rms_2eV_EF"]=wm["rms_within_2eV_of_EF_eV"]
                     continue
                 m,_=scores(full,s)
-                if self.objective_name=="window":
+                if self.objective_name in ("window","metal") and s.get("target_all") is not None:
                     wm=self.window_metrics(full,s)
                     val=wm["total"]
                     line[s["name"]+"_window_rms_eV"]=wm["window_rms_eV"]
@@ -329,7 +363,12 @@ class Fitter:
             line["regularization"]=reg
             if self.overlap_min_eig>0 and cost<self.best_checked:
                 self.overlap_checks+=1
-                smin=min(self.overlap_min(s,params,K) for s in self.train)
+                if self.workers>1 and len(self.train)>1:
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(min(self.workers,len(self.train))) as pool:
+                        smin=min(pool.map(lambda s:self.overlap_min(s,params,K),self.train))
+                else:
+                    smin=min(self.overlap_min(s,params,K) for s in self.train)
                 line["overlap_min_eig"]=smin
                 if smin<self.overlap_min_eig:
                     self.overlap_rejected+=1
@@ -548,7 +587,7 @@ def main():
       structure_formats={s["name"]:resolved_structure_format(s["cif"],s.get("structure_format"))
                          for s in f.train},
       objective=f.objective_name,objective_settings=f.wset.to_dict() if f.objective_name in ("window","metal") else None,
-      basis_added=f.basis_add or None,start_from=str(f.start_from) if f.start_from else None,
+      basis_added=f.basis_add or None,basis_double_zeta=f.basis_dz or None,start_from=str(f.start_from) if f.start_from else None,
       overlap_check=dict(min_eigenvalue_required=f.overlap_min_eig,checks=f.overlap_checks,
                          candidates_rejected=f.overlap_rejected))
     (out/"fit.json").write_text(json.dumps(state,indent=2)+"\n")

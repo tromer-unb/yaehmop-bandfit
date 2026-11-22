@@ -30,6 +30,13 @@ python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir path/to/bands --dft-cod
 | FHI-aims | `band1001.out`, … + `control.in` (`output band`) | `geometry.in` | occupations in the band files | `output band` |
 | Wannier90 | `seedname_band.dat` + `seedname_band.kpt` (interpolated TB bands, `bands_plot = true`) | `seedname.nnkp` (`real_lattice`) or `.win` (`unit_cell_cart`) + atoms of the `.win` | bands below the Fermi level: `fermi_energy` in the `.win`, else the OUTCAR / pw.x output in the folder | `seedname_band.labelinfo.dat` |
 
+Spin-polarized runs whose channels differ only through a spurious small magnetization can be fitted
+to the mean of both channels with `--spin-channel average` (`[reference] spin_channel = average`).
+Semicore states of the DFT potential that the EHT basis lacks (Ti 3s3p of `Ti_sv`, Ga 3d, ...) are dropped
+by default: `--semicore auto` (`[reference] semicore`) removes the (NELECT − EHT electrons)/2 lowest bands
+when the DFT electron count is known (VASP, QE); give an integer, or 0 to keep them. This matters for the
+metal objective, which pairs bands from the bottom.
+
 When the files carry no labels, the high-symmetry points are named from the
 Bravais lattice (ASE), including symmetry-equivalent positions; otherwise
 `K1, K2, …`. If several candidate files exist, choose one with `--dft-file`.
@@ -131,6 +138,17 @@ another material) with the bounds centred there. Examples: `validation/refine/*.
 
 `--basis-add "S:d H:p"` or `auto` adds shells YAeHMOP accepts but the stock table lacks
 (p on H, d on s/p elements, the 3d of Zn); they start from estimates and are fitted.
+
+`--basis-dz "S:p"` (`[fit] basis_dz`, `basis_dz:` in a family manifest) makes a shell double
+zeta: its exponent becomes the inner function and a diffuse tail (ζ2 = ζ1/2, c2/c1 = 0.3 at the
+start) is added; ζ1, ζ2 and c2/c1 are fitted. Use it when one exponent cannot give both the bonds
+inside a layer and the coupling across a van der Waals gap (splitting of the bands of the
+different layers of a slab). d and f shells work with the original YAeHMOP; s/p shells need a
+`bind` with double-zeta p, [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop)
+(commit 742719c or later), set through `YAEHMOP_BIND`. The original program reads the line but
+uses only the first exponent, so every YAeHMOP run checks the `.out` (`3P DZ:`) and stops if
+the second exponent was ignored. The exported `huckel-NP.dat` and the WanTiBEXOS interface of
+the fork work with double-zeta p.
 
 `validation/compare_strategies.py` refits all examples with several protocols
 (`frontier-de`, `window-de`, `window-ga`, `window-cmaes`, `window-ga-basis`) into

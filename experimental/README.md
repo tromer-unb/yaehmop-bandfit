@@ -1,6 +1,6 @@
 # Optional research extension: genuine carbon 2p double-zeta
 
-**Research-only C source patch for an external YAeHMOP checkout. It is NOT part of the standard installation or the original YAeHMOP stock binary.** The original `bind` source/binary and atomic tables are NOT redistributed here.
+**Historical research patch.** It is now merged, for the p shell of any element, into the fork [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (commit 742719c), which `install.sh --build-yaehmop` compiles; use the fork instead of applying this file. It is NOT part of the original YAeHMOP stock binary. The original `bind` source/binary and atomic tables are NOT redistributed here.
 
 ### What it changes
 
