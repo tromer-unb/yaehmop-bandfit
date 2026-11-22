@@ -287,6 +287,16 @@ def build_training_config(m,train_entries,args,manifest_dir,radius):
         if K0 is not None:cfg['start_K']=float(K0)
     return cfg
 
+def _objective_without_reg(results,saved,train):
+    vals=[];wts=[]
+    for s in train:
+        m=(saved.get('metrics') or {}).get(s['name'],{})
+        v=m['window'].get('total') if isinstance(m.get('window'),dict) else m.get('total')
+        if v is None:v=results.get(s['name'],{}).get('window_total')
+        if v is None:return None
+        vals.append(float(v));wts.append(float(s['weight']))
+    return sum(v*w for v,w in zip(vals,wts))/sum(wts) if vals else None
+
 def _metric_text(met):
     for key,lab in (('window_rmse_eV','window RMSE'),('window_rms_eV','window RMS'),('selected_rmse_eV','RMSE')):
         if met.get(key) is not None:
@@ -448,6 +458,9 @@ def main(argv=None):
         'test_references_opened_only_after_fit':True,
         'systems':results,'overview_figure':str(ov) if ov else None,
         'best_training_loss':saved.get('best_training_loss'),
+        # mean per-system objective WITHOUT the regularization term: comparable between rounds with
+        # different starting points (the regularization is centred at the start table)
+        'training_objective_without_regularization':_objective_without_reg(results,saved,train),
         'objective_optimizer_evaluations':saved.get('objective_evaluations'),
         'optimizer':None if args.evaluate else args.optimizer,'budget':None if args.evaluate else args.budget,
         'objective_settings':objset,'basis_added':saved.get('basis_added'),
