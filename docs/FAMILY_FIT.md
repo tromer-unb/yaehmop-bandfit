@@ -27,6 +27,8 @@ Global keys: `n_pairs`, `objective` (default: `metal` if a training member is me
 
 `basis_dz` together with `start_from` starts the diffuse tail almost equal to the inner function (ζ2 = ζ1 − 0.15, c2/c1 = 0.05), so the first evaluation reproduces the starting table (TiSe₂ slabs: 0.3837 against 0.383).
 
+Test of the p double-zeta (2026-11-23): TiTe₂ slabs (1L, 3L–5L, window ±1.5 eV, `w_split`, segment weights), starting from the chosen fit, CMA-ES 3000 + Nelder–Mead polish, `overlap_radius: auto`: without `basis_dz` the objective stays at 0.3717 (no better point in 3000 evaluations: the start is a local minimum); with `basis_dz: Te:p` it stays at its first value, 0.3769 (tail ζ2 = ζ1 − 0.15, c2/c1 = 0.05 unchanged), RMSE in the window 0.072–0.077 eV for both. As in TiSe₂ and the 3L TiS₂ test, the second p exponent of the chalcogen brings no gain for these slabs; `basis_add` (d shell) and the objective weights matter more.
+
 Example: one table for TiS₂ in seven structures (VASP, PBE, spin-polarized runs with ~0 magnetization, Ti_sv):
 
 ~~~yaml
