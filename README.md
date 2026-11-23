@@ -5,7 +5,7 @@
 **Fit and visualize electronic bands with physical extended Hückel theory — 2, 4, 6 or 8 bands.**
 
 [![Lightweight I/O tests](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml/badge.svg)](https://github.com/tromer-unb/yaehmop-bandfit/actions/workflows/tests.yml)
-[**Fit YOUR CIF + PNG**](docs/FIT_YOUR_MATERIAL.md) · [**Guia em português**](docs/GUIA_RAPIDO_PT.md) · [Quick examples](#quick-start) · [SnS₂ / paper Fig. 4](#featured-example-sns₂--paper-figure-4) · [Shared transfer](docs/SHARED_FITTING.md) · [All six compounds](docs/CHALCOGENIDES.md) · [Carbon results](docs/BEST_RESULTS.md) · [All CLI flags](docs/CLI_REFERENCE.md)
+[**What's new**](#whats-new-november-2026) · [**Graphical interface**](#graphical-interface-band_fit_guipy) · [**Fit YOUR CIF + PNG**](docs/FIT_YOUR_MATERIAL.md) · [**Guia em português**](docs/GUIA_RAPIDO_PT.md) · [Quick examples](#quick-start) · [SnS₂ / paper Fig. 4](#featured-example-sns₂--paper-figure-4) · [Shared transfer](docs/SHARED_FITTING.md) · [All six compounds](docs/CHALCOGENIDES.md) · [Carbon results](docs/BEST_RESULTS.md) · [All CLI flags](docs/CLI_REFERENCE.md)
 
 The **original study** evaluates **six Ge/Sn chalcogenides** — **GeS, GeSe, GeTe, SnS₂, SnSe and SnTe** — with exactly matched **1V+1C, 2V+2C, 3V+3C and 4V+4C** reference/model windows. It also measures chemical leave-one-system-out transferability. **Graphene, phagraphene, diamond and graphite are later carbon extensions**, not the entire scope of this work.
 
@@ -41,7 +41,23 @@ python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400 --outdir outpu
 
 The last three physical operations require a YAeHMOP `bind` executable, preferably the [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) fork (`./install.sh --build-yaehmop`), and an atomic parameter table set with YAEHMOP_BIND / YAEHMOP_PARAM_FILE. The example paths are placeholders, not bundled reference bands. **Direct** sees the target in fitting; **frozen evaluation** does not change parameters; **family fitting** excludes a whole held-out target until after the shared fit. These image commands need **gapped, nonmagnetic, spinless** references. Numerical DFT references (`--dft-dir`) also accept spin-polarized runs (`--spin-channel up|down|average`), metals (`objective = metal`), semicore removal (`--semicore auto`) and spin-orbit fits (`soc_fit.py`); see [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md). `family_fit.py` accepts every one of these references (DFT folders of any code, gapped and metallic mixed, images, CSV) as members of one shared fit; see [docs/FAMILY_FIT.md](docs/FAMILY_FIT.md). Do not claim Fermi-surface accuracy from a 1D PNG.
 
-**Speed:** `--overlap-radius auto` picks the smallest converged lattice sum per system, the population optimizers evaluate a generation in parallel (`--parallel`), and `--optimizer alternating` alternates YAeHMOP stages with fast numpy stages in which only Hii and K move (cached S(k)); on anatase TiS₂ one evaluation went from 1.1 s to 64 ms (13 ms in the fast stages). See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#optimizers).
+## What's new (November 2026)
+
+| Area | What you get | Where |
+|---|---|---|
+| **Graphical interface** | `python band_fit_gui.py`: every command and option in a desktop window, several fits at once with live progress, figures and metrics; a **family-fit manifest editor** (no YAML to type) | [below](#graphical-interface-band_fit_guipy), [docs/GUI.md](docs/GUI.md) |
+| **Raw DFT bands as reference** | `--dft-dir FOLDER --dft-code vasp\|qe\|siesta\|aims\|wannier90`: fits the eigenvalues themselves, with a band-window objective (states near E_F weigh more, gaps, band edges, extrema) | [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md), [validation/](validation/README.md) |
+| **Metals, spin, SOC** | `objective = metal` (bands aligned at E_F), `--spin-channel up\|down\|average` + `spin_combine.py` (spin-polarized H), `soc_fit.py` (on-site λ L·S); `--semicore auto` drops semicore bands | [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md) |
+| **Hamiltonian export** | every fit writes `fitting/` with the parameters, figures and the EHT H(R), S(R) as text (`huckel-NP.dat`, `huckel-SOC.dat`, `huckel-SP.dat`, WanTiBEXOS format), checked with `wtb.x`; S(k) is kept positive definite during the fit so the export always works | [manual](manual/manual.pdf) §5.4 |
+| **Family fits** | one table for several systems mixing DFT folders of any code (gapped and metallic), pictures and CSV, train/test roles, per-member weights, overlap radius and objective weights, `--evaluate` of an earlier fit | [docs/FAMILY_FIT.md](docs/FAMILY_FIT.md) |
+| **Speed** | `--overlap-radius auto` (smallest converged lattice sum per system), **parallel populations** (`--parallel`) and `--optimizer alternating` (fast numpy stages where only Hii and K move, with S(k) cached): anatase TiS₂, one evaluation 1.1 s → 64 ms (13 ms in the fast stages) | [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#optimizers) |
+| **Optimizers** | DE, CMA-ES, GA, Bayesian, Powell, alternating, each with optional Nelder–Mead/Powell polish, besides the staged default | [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#optimizers) |
+| **Larger basis** | `--basis-add "S:d"`, `--basis-dz "S:p"` (double-zeta shells), `--start-from` an earlier fit | [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md) |
+| **Structure formats** | CIF, VASP, Quantum ESPRESSO, SIESTA, FHI-aims, detected automatically | [docs/STRUCTURE_FORMATS.md](docs/STRUCTURE_FORMATS.md) |
+| **Native SOC/spin of the fork** | with the [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) `bind`, `soc_fit.py` checks its λ's with `bind --soc` and `spin_combine.py` runs both channels with `--parm-up/--parm-down --common-fermi` (common E_F, moment) | [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) |
+| **Installation** | `./install.sh` creates the conda environment `yaehmop-bandfit` (with PySide6 for the GUI); `--build-yaehmop` compiles the fork | [docs/INSTALLATION.md](docs/INSTALLATION.md) |
+
+The full user manual (PDF, 32 pages) is [manual/manual.pdf](manual/manual.pdf). Earlier states of the code are tagged (`v2026.11.22`, `main-before-adias-dev`).
 
 ## YAeHMOP solver: the ac-dias/yaehmop fork
 
@@ -55,20 +71,56 @@ The last three physical operations require a YAeHMOP `bind` executable, preferab
 > obtained with upstream YAeHMOP stay valid. Upstream [greglandrum/yaehmop](https://github.com/greglandrum/yaehmop)
 > silently ignores a second p exponent; BandFit detects this and stops instead of fitting nonsense.
 
-## Graphical interface
+## Graphical interface (`band_fit_gui.py`)
 
 ```bash
+./install.sh                      # once: conda environment yaehmop-bandfit (PySide6 included)
 conda activate yaehmop-bandfit
 python band_fit_gui.py
 ```
 
-A desktop window (Qt) with every command and every command-line option: fit to a **picture of the
-bands + crystal structure**, fit to a **DFT folder** (VASP, QE, SIESTA, FHI-aims, Wannier90; gapped,
-spin-polarized or metallic), spin-orbit, spin combination, transfer, family fits (with a manifest editor) and image tools.
-Several fits run at the same time with live progress, figures and metrics; at the end a window compares the fit with the original data (for a picture, the EHT bands are drawn over it). Free-text options have drop-down lists of typical values. See
-[docs/GUI.md](docs/GUI.md).
+A desktop window (Qt, no web browser) that runs the same command-line tools, so every option of the
+terminal is there and every run can be repeated in a script (*Show command*). Without the conda
+environment: `pip install PySide6-Essentials`. The YAeHMOP `bind` comes from `YAEHMOP_BIND` (set by the
+environment) or from *File → YAeHMOP executable and parameters*.
 
-![BandFit GUI](manual/gui_figs/gui_image_fit.jpg)
+![BandFit GUI: fit to a band picture](manual/gui_figs/gui_image_fit.jpg)
+
+**Layout.** Left: the list of tasks. Middle: the form of the chosen task. Right: the **Runs** panel
+(status, time, calls and best loss of every run; for the selected run its *Log*, the live *Progress*
+plot and the *Results*: all figures and the main metrics).
+
+**Fit to a DFT calculation** (task *Fit to DFT*):
+1. choose the folder of the band calculation; the package is detected (VASP, QE, SIESTA, FHI-aims,
+   Wannier90) and a spin-polarized VASP run is flagged;
+2. *Preview* reads the bands without fitting and shows them; if they cross the Fermi level the
+   interface offers `objective = metal`;
+3. set the run name and output folder; adjust the INI form if needed (energy window, `n_pairs`,
+   `budget`, `optimizer`, `basis_add`, `overlap_radius` = `auto`, objective weights) — every field has a
+   tooltip and a ▾ list of typical values;
+4. *Run fit*. For a spin-polarized run, *Fit both spins* fits up and down at the same time and joins
+   them (`huckel-SP.dat`).
+
+**Fit to a picture of the bands** (task *Fit to image*): give the structure (CIF, POSCAR, QE, SIESTA,
+FHI-aims) and the picture (PNG/JPEG/TIFF/WebP) or CSV, the energy limits of the plot and the k path
+(or pick a *standard path*), *Preview* to check the extracted curves, then *Run fit*. At the end the
+fitted EHT bands are drawn over your own picture.
+
+**Family fit** (one table for several systems): *Add DFT folders…* (several at once) or *Add picture
+member…*, set the role (train/test), weight and any per-member key in the table, the shared settings
+above it, choose the mode (*Fit*, *Validate only*, *Prepare only*, *Evaluate an earlier fit*) and *Run*.
+The manifest is written for you (*Show YAML*, *Save*, *Load…*). Results: the family overview, the
+figures of every member and one line of errors per member.
+
+![Family fit: manifest editor](manual/gui_figs/gui_family_editor.jpg)
+
+**Other tasks:** *Spin-orbit* (`soc_fit.py`, on top of a spinless fit), *Spin combine*, *Frozen
+transfer*, *Compare strategies* (validation protocols) and *Image tools*.
+
+**When a fit ends** a window opens with the comparison against the original data (EHT bands on the
+picture, or all DFT and EHT bands) and the main errors; *Open results…* shows any existing `fitting/`
+folder. Several fits can run at the same time; each is a separate process. More in [docs/GUI.md](docs/GUI.md)
+and in section 3 of the [manual](manual/manual.pdf).
 
 ## Quick start
 
@@ -120,7 +172,7 @@ python USER_WORKFLOW/bands_fit.py \
 
 **PNG pipeline:** [inspect → select visible curves → standardize to bands_N_layers.png → numerical CSV + QA](docs/FIT_YOUR_MATERIAL.md#2-inspect-the-png-and-prepare-the-band-reference-fast-no-solver). PNG/JPEG/TIFF/WebP and CSV are supported; user-reported image axes/paths must match the actual DFT reference. **--image** and **--png** are both valid aliases. Use **--pairs 2/3/4** only if the reference really contains 4/6/8 identifiable bands. Complete [flags](docs/CLI_REFERENCE.md).
 
-**Multi-material?** See [joint family fitting](docs/FAMILY_FIT.md) and [frozen-transfer evaluation](docs/START_HERE.md#4-option-b-frozen-transfer-no-refit). The family_fit.py wrapper standardizes each training material into the same 2/4/6/8-band target used by the physical shared optimizer, and reserves whole test materials until the vector is frozen. The older fit_shared.py expert prototype is separate and uses full-orbital tracing. The carbon double-zeta patch is experimental. Ideal gapless graphene, metallic and SOC/spin-polarized references require other objectives.
+**Multi-material?** See [joint family fitting](docs/FAMILY_FIT.md) and [frozen-transfer evaluation](docs/START_HERE.md#4-option-b-frozen-transfer-no-refit). The family_fit.py wrapper standardizes each training material into the same 2/4/6/8-band target used by the physical shared optimizer, and reserves whole test materials until the vector is frozen. Family members may also be DFT folders (gapped, metallic or spin-polarized). The older fit_shared.py expert prototype is separate and uses full-orbital tracing (it now also writes `systems/<name>/fitting/`). The carbon double-zeta patch is experimental. For picture references, ideal gapless graphene, metals and SOC/spin-polarized cases need a numerical DFT reference instead.
 
 ## Featured example: SnS₂ — paper Figure 4
 
