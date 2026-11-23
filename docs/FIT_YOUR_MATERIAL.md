@@ -13,6 +13,15 @@ What the program produces: fitted native YAeHMOP orbital table and K, numerical 
 
 > **Scope:** the present image-to-fit frontend assumes a nonmagnetic, spinless, **gapped** semiconductor. It rejects near-zero/negative frontier gaps. Graphene with a Dirac crossing, spin-polarized systems, SOC-split bands, and other metallic references need specialized objectives. "Any material" means any material with supported YAeHMOP orbitals and compatible reference bands, **not** universal physics for all substances.
 
+> **Graphical interface:** every step below is also in `python band_fit_gui.py`, task *Fit to image*
+> ([GUI.md](GUI.md)). Worked example with real data: [examples/gui_mos2](../examples/gui_mos2/README.md)
+> (MoS₂ monolayer from a picture of its PBE bands: RMSE 0.074 eV with `optimizer = cmaes`, `budget = 4000`,
+> `polish = nelder-mead`, `basis_add = auto`).
+>
+> **Faster fits:** `overlap_radius = auto` in `[fit]` (smallest converged lattice sum), `--parallel`
+> (population of CMA-ES/DE/GA evaluated at once) and `--optimizer alternating` (fast Hii/K stages); see
+> [CLI_REFERENCE.md](CLI_REFERENCE.md#optimizers).
+
 ## 0. Install once
 
 From a clean clone of this repository (all following commands assume its root):

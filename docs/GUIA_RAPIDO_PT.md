@@ -4,10 +4,42 @@
 
 ## 0. Interface gráfica
 
-Quem prefere janelas a linha de comando pode usar `python band_fit_gui.py` (com o ambiente
-`yaehmop-bandfit` ativado): ajuste por figura das bandas + estrutura, ajuste a uma pasta DFT, SOC,
-spin polarizado, transferência e ferramentas de imagem, com todas as opções dos comandos, vários
-ajustes ao mesmo tempo, progresso ao vivo, figuras e métricas. Detalhes em [GUI.md](GUI.md).
+Quem prefere janelas a linha de comando pode usar a interface gráfica:
+
+~~~bash
+./install.sh                      # uma vez: cria o ambiente conda yaehmop-bandfit (com PySide6)
+conda activate yaehmop-bandfit
+python band_fit_gui.py
+~~~
+
+A janela tem a lista de tarefas à esquerda, o formulário da tarefa no meio e o painel **Runs** à
+direita (estado, tempo, chamadas e melhor custo de cada ajuste; para o ajuste selecionado, o *Log*, o
+gráfico de *Progress* ao vivo e os *Results*: todas as figuras e as métricas). Cada campo tem dica e
+uma lista ▾ de valores típicos; *Show command* mostra a linha de comando equivalente.
+
+- **Fit to image** (figura + estrutura): escolha a estrutura e a figura (PNG/JPEG/TIFF/WebP ou CSV), os
+  limites de energia e o caminho k (ou um *standard path*), *Preview* para conferir as curvas lidas,
+  *Run fit*. No fim, as bandas EHT aparecem desenhadas sobre a sua figura. Para testar:
+  *Load INI* → `examples/gui_mos2/MoS2_2bands.ini`, estrutura `MoS2_monolayer.vasp`, figura
+  `MoS2_PBE_2bands.png` (MoS₂ monocamada, RMSE 0,074 eV em ~1 min).
+- **Fit to DFT**: escolha a pasta do cálculo de bandas (pacote detectado: VASP, QE, SIESTA, FHI-aims,
+  Wannier90), *Preview*, *Run fit*. Metais: a interface oferece `objective = metal`. Spin polarizado:
+  *Fit both spins* ajusta up e down juntos e gera `huckel-SP.dat`.
+- **Family fit** (uma tabela para vários sistemas): *Add DFT folders…* (várias pastas de uma vez) ou
+  *Add picture member…*, papel train/test, peso e chaves por membro na tabela, configurações comuns
+  acima, modo (*Fit*, *Validate only*, *Prepare only*, *Evaluate an earlier fit*) e *Run*; o manifesto
+  YAML é escrito sozinho (*Show YAML*, *Save*, *Load…*).
+- **Spin-orbit**, **Spin combine**, **Frozen transfer**, **Compare strategies** e **Image tools**.
+
+Ao terminar um ajuste abre uma janela com a comparação contra os dados originais. Detalhes em
+[GUI.md](GUI.md).
+
+**Ajustes mais rápidos (novembro de 2026):** `overlap_radius = auto` (em `[fit]` ou
+`--overlap-radius auto`) escolhe por sistema o menor raio das somas de rede convergido; os otimizadores
+de população (CMA-ES, DE, GA, Bayes) avaliam cada geração em paralelo (`--parallel`, padrão: núcleos /
+sistemas); `--optimizer alternating` alterna etapas com o YAeHMOP e etapas rápidas em numpy em que só
+Hii e K mudam (S(k) em cache). No anatase TiS₂ uma avaliação caiu de 1,1 s para 64 ms (13 ms nas etapas
+rápidas). Para slabs 2D, onde o YAeHMOP já é barato, use `cmaes` com população paralela.
 
 ## 1. Instalar e colocar os arquivos
 
@@ -129,7 +161,7 @@ python3 quick.py chemical-transfer
 python3 quick.py transfer
 ~~~
 
-O programa **parameter_fitter/fit_shared.py** aceita YAML com vários sistemas de treinamento e teste, mas **ainda não oferece o mesmo suporte direto a PNGs com apenas 2/4/6/8 bandas** do programa individual. Não basta usar duas imagens comuns para garantir um ajuste compartilhado correto. Veja o [guia específico](SHARED_FITTING.md).
+Para uma tabela compartilhada por vários materiais use o **family_fit.py** (seção 7 e [FAMILY_FIT.md](FAMILY_FIT.md)): aceita pastas DFT de qualquer código (com gap ou metálicas, spin polarizadas), figuras e CSV, papéis train/test e, por membro, peso, raio de overlap e pesos do objetivo. O protótipo antigo **parameter_fitter/fit_shared.py** traça todos os orbitais (não o contrato de 2/4/6/8 bandas); agora também grava `systems/<nome>/fitting/` com H(R) e S(R). Veja o [guia específico](SHARED_FITTING.md).
 
 O ajuste por imagem exige bandas e gap identificáveis, uma base orbital suportada e um caminho k correto. Grafeno com cone de Dirac, metais, sistemas magnéticos e SOC precisam de tratamento especializado. O patch de dupla-zeta **2p do carbono** é experimental, separado do executável original e não valida automaticamente bases duplas de outros elementos.
 

@@ -25,6 +25,7 @@ This repository includes three different categories of demonstration. They serve
 | Example | Input / structure | What is provided | Solver needed? |
 |---|---|---|---|
 | Synthetic bands | `examples/synthetic/toy_2bands.{csv,png}` and `toy_4bands` | **Original toy equations**, input parser/bitplane QA only; NOT DFT. | No |
+| MoS₂ monolayer from a picture | `examples/gui_mos2/` (structure, picture of the PBE 1 VB + 1 CB, INI) | Real PBE bands (FHI-aims, `validation/aims/MoS2_monolayer_pbe`) drawn as an ordinary band picture; the example of the graphical interface. CMA-ES 4000 + polish: RMSE 0.074 eV, gap error 0.001 eV | **Yes** (to fit) |
 | Graphene (2D) | `examples/structures/graphene.cif` | Saved original-YAeHMOP **full 8-orbital** eigenvalues on 37 k nodes, from an earlier 1V+1C fitted calculation; not external PBE source bands. | No for viewing |
 | Diamond (3D) | `examples/structures/diamond.cif` | Saved original-YAeHMOP **full 8-orbital** eigenvalues on 25 k nodes from a 1V+1C direct fit. | No for viewing |
 | AB graphite (3D) | `examples/structures/graphite_AB.cif` | Saved original-YAeHMOP **full 16-orbital** eigenvalues on 49 k nodes from a 1V+1C direct fit. | No for viewing |

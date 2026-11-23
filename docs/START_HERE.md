@@ -3,7 +3,8 @@
 This guide contains **real commands**. The CIF never creates a DFT reference; you must supply a physically documented PNG or numeric band CSV.
 
 > Prefer windows to the terminal? `python band_fit_gui.py` opens the desktop interface with every
-> command below ([GUI.md](GUI.md)).
+> command below, including a manifest editor for family fits ([GUI.md](GUI.md)). A ready example:
+> `examples/gui_mos2/` (MoS₂ monolayer fitted from a picture of its PBE bands).
 
 ## 1. Install once
 
@@ -122,6 +123,6 @@ Use a numerical CSV when screenshot extraction is ambiguous, or supply separate 
 
 ## 7. Scope and limitations
 
-These public fitting and transfer entrypoints support **spinless, nonmagnetic, positively gapped systems with an eligible EHT orbital basis**. Metallic 1T and ideal Dirac graphene require specialized objectives, not a disguised semiconductor fit. P27/P28 d/p coupling research variants are not arbitrary-element stock-YAeHMOP flags; better direct path RMSE need not imply better transferable Fermi physics.
+The picture/CSV entrypoints support **spinless, nonmagnetic, positively gapped systems with an eligible EHT orbital basis**. Numerical DFT references (`--dft-dir`) also cover metals (`objective = metal`), spin-polarized runs and spin–orbit fits ([DFT_REFERENCE.md](DFT_REFERENCE.md)). Ideal Dirac graphene from a picture still needs a specialized objective. P27/P28 d/p coupling research variants are not arbitrary-element stock-YAeHMOP flags; better direct path RMSE need not imply better transferable Fermi physics.
 
 No new DFT calculation is performed by these scripts. Third-party DFT arrays and upstream YAeHMOP binary/atomic tables are not redistributed.
