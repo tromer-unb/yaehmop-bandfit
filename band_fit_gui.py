@@ -2233,12 +2233,12 @@ def _selftest(app, w, out, QtCore):
             shot(f"tab{i}_{w.tabs.tabText(i).replace(' ', '_')}")
         w.tabs.setCurrentIndex(1)
         t = w.tabs.widget(1)
+        # the settings of the best validated Al2O3 bilayer fit (window objective, Al d shell, 8000 calls)
+        t.ini.load(str(ROOT / "validation/refine_v1c3/cmaes-basis-8k.ini"))
         t.f_dir.set(str(ROOT / "validation/siesta/Al2O2_bilayer_test"))
         t.f_name.set("selftest_Al2O2")
         t.f_out.set(str(out / "runs"))
-        t.ini.set("fit", "budget", "1500")
-        t.ini.set("fit", "optimizer", "cmaes")
-        t.ini.set("fit", "basis_add", "Al:d")
+        t.ini.set("fit", "overlap_radius", "auto")
         shot("dft_filled")
         t.fit()
         steps.append(time.time())
@@ -2246,7 +2246,7 @@ def _selftest(app, w, out, QtCore):
 
     def wait():
         j = w.runs.jobs[-1]
-        if j.status == "running" and time.time() - steps[0] < 600:
+        if j.status == "running" and time.time() - steps[0] < 1200:
             pr = j.progress()
             if not (out / "progress.png").exists() and pr and len(pr[0]) > 400:
                 w.runs.tabs.setCurrentIndex(1)
@@ -2265,14 +2265,13 @@ def _selftest(app, w, out, QtCore):
     def image():
         w.tabs.setCurrentIndex(0)
         t = w.tabs.widget(0)
-        t.ini.load(str(ROOT / "examples/configs/synthetic_2bands.ini"))
+        # MoS2 monolayer: picture of the PBE top valence / bottom conduction band (examples/gui_mos2)
+        t.ini.load(str(ROOT / "examples/gui_mos2/MoS2_2bands.ini"))
         t.after_load()
-        t.f_struct.set(str(ROOT / "examples/structures/graphene.cif"))
-        t.f_image.set(str(ROOT / "examples/synthetic/toy_2bands.png"))
-        t.ini.set("reference", "mode", "auto")
-        t.f_name.set("selftest_image")
+        t.f_struct.set(str(ROOT / "examples/gui_mos2/MoS2_monolayer.vasp"))
+        t.f_image.set(str(ROOT / "examples/gui_mos2/MoS2_PBE_2bands.png"))
+        t.f_name.set("selftest_MoS2")
         t.f_out.set(str(out / "runs"))
-        t.ini.set("fit", "budget", "150")
         shot("image_filled")
         t.preview()
         QtCore.QTimer.singleShot(1000, lambda: wait_image("preview"))
@@ -2296,21 +2295,21 @@ def _selftest(app, w, out, QtCore):
             family()
 
     def family():
-        # Family fit tab: two QE members (one test), alternating optimizer, automatic radius
+        # Family fit tab: one table for two silicon polymorphs (QE, LDA), automatic radius, Si d shell
         i = [w.tabs.tabText(k) for k in range(w.tabs.count())].index("Family fit")
         w.tabs.setCurrentIndex(i)
         t = w.tabs.widget(i)
         t.table.setRowCount(0)
         t.add_row({"name": "Si_diamond", "role": "train", "dft_dir": str(ROOT / "validation/qe/Si_diamond_lda"),
                    "dft_code": "qe"})
-        t.add_row({"name": "SiC", "role": "train", "dft_dir": str(ROOT / "validation/qe/SiC_zincblende_pbe"),
-                   "dft_code": "qe", "objective_settings": "w_split: 20"})
-        t.add_row({"name": "Si_wurtzite", "role": "test", "dft_dir": str(ROOT / "validation/qe/Si_wurtzite_lda"),
+        t.add_row({"name": "Si_wurtzite", "role": "train", "dft_dir": str(ROOT / "validation/qe/Si_wurtzite_lda"),
                    "dft_code": "qe"})
         t.glob["overlap_radius"].set("auto")
+        t.glob["basis_add"].set("auto")
         t.form.set("outdir", str(out / "runs/selftest_family"))
-        t.form.set("optimizer", "alternating")
-        t.form.set("budget", "120")
+        t.form.set("optimizer", "cmaes")
+        t.form.set("polish", "nelder-mead")
+        t.form.set("budget", "3000")
         t.f_manifest.set(str(out / "runs/selftest_family.yaml"))
         shot("family_filled")
         t.run()
@@ -2319,7 +2318,7 @@ def _selftest(app, w, out, QtCore):
 
     def wait_family():
         j = w.runs.jobs[-1]
-        if j.status == "running" and time.time() - steps[-1] < 900:
+        if j.status == "running" and time.time() - steps[-1] < 1800:
             QtCore.QTimer.singleShot(1000, wait_family)
             return
         w.runs.refresh_selected()

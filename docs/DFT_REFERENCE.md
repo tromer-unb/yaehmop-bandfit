@@ -203,8 +203,10 @@ then the same n spin-down), with zero up-down blocks and each channel shifted by
 `huckel-SP.dat` + `basis_set-SP` (WanTiBEXOS `SP` format). With the bind of the fork, the two tables
 also run together (`bind --parm-up --parm-down --common-fermi`): bands of each channel checked against
 `huckel-SP.dat`, common Fermi level, electrons per channel, moment (`native_spin`; input in
-`yaehmop_spin/`). That native run uses the absolute EHT energies of the separately fitted tables (bcc Fe:
-moment 1.95 μB natively, 2.26 in `huckel-SP.dat` with both channels at the DFT E_F, DFT 2.24).
+`yaehmop_spin/`). The separately fitted tables have different energy zeros, so they are aligned first
+(Hii of the up table −δ/2, of the down table +δ/2, until both put the DFT E_F at the same EHT energy;
+`--no-align` skips it). bcc Fe: moment 1.95 μB with the fitted tables, 2.14 μB aligned (band shape within
+0.13 eV), 2.26 in `huckel-SP.dat`, 2.24 in PBE.
 
 ## Metals (`objective = metal`)
 

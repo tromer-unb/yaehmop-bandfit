@@ -56,13 +56,24 @@ def read_tb(path):
     return cell, n, blocks
 
 
-def native_spin(up, dn, out, mesh_radius=4):
-    """Both channels in one native spin-polarized bind run (fork ac-dias/yaehmop):
-    per-channel bands from the dumped H(k), S(k) against huckel-SP.dat (same k mesh), common
-    Fermi level, electrons per channel and magnetic moment. None if the bind lacks the option."""
-    from yaehmop_generic import (resolve_yaehmop_assets, bind_features, run_bind_args, gamma_mesh,
+def native_spin(up, dn, out, mesh_radius=4, align=True):
+    """Both channels in one native spin-polarized bind run (fork ac-dias/yaehmop), on a
+    Gamma-centred mesh: per-channel bands (from the dumped H(k), S(k)) against huckel-SP.dat,
+    common Fermi level, electrons per channel and magnetic moment.
+
+    The two channel tables are fitted separately, each aligned at the DFT Fermi level with its own
+    energy offset, so their ABSOLUTE EHT energies differ by an arbitrary constant and a common-Fermi
+    run with them is not physical. With align=True all Hii of the spin-up table are shifted by -delta/2
+    and those of the spin-down table by +delta/2 (secant search on bind runs) until both channels have
+    the same offset, i.e. both tables put the DFT Fermi level at the same EHT energy; the common-Fermi
+    run is then repeated with the aligned tables (yaehmop_spin/up.dat, down.dat; the fitted ones as
+    up_fit.dat, down_fit.dat). A uniform
+    Hii shift is not an exact rigid shift in EHT (K and THE CONST DIAG weigh it), so the remaining
+    change of the band shape is reported."""
+    import scipy.linalg as sl
+    from yaehmop_generic import (resolve_yaehmop_assets, bind_features, run_bind_args, run_bind, gamma_mesh,
                                  write_periodic_input_generic, overlap_images_for, read_matrix_dump,
-                                 parse_parameter_table, valence_electrons)
+                                 parse_parameter_table, valence_electrons, write_parameter_file)
     from structure_io import read_structure
     bind, _ = resolve_yaehmop_assets()
     if "spin" not in bind_features(bind):
@@ -74,69 +85,127 @@ def native_spin(up, dn, out, mesh_radius=4):
     syms = read_structure(poscar, "vasp").get_chemical_symbols()
     nelec = valence_electrons(parse_parameter_table(up["dir"] / "parameters_huckel.dat"), syms)
     mesh = gamma_mesh(dim, mesh_radius)
+    images = overlap_images_for(dim, radius)
     keep = out / "yaehmop_spin"; keep.mkdir(exist_ok=True)
-    shutil.copy(up["dir"] / "parameters_huckel.dat", keep / "up.dat")
-    shutil.copy(dn["dir"] / "parameters_huckel.dat", keep / "down.dat")
     shutil.copy(poscar, keep / "POSCAR")
-    Ku, Kd = float(up["summary"]["K_EHT"]), float(dn["summary"]["K_EHT"])
-    args = ["--parm-up", "up.dat", "--parm-down", "down.dat", "--const-up", f"{Ku:.12g}", "--const-down", f"{Kd:.12g}",
-            "--common-fermi"]
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        for f in ("up.dat", "down.dat"):
-            shutil.copy(keep / f, tmp / f)
-        inp = write_periodic_input_generic(poscar, tmp / "spin.bind", None, Ku, True, nelec,
-                                           overlap_images=overlap_images_for(dim, radius), periodic_dim=dim,
-                                           structure_format="vasp", kpoints=mesh, average_properties=True)
-        shutil.copy(inp, keep / "spin.bind")
+    K = {"up": float(up["summary"]["K_EHT"]), "down": float(dn["summary"]["K_EHT"])}
+    tables = {"up": parse_parameter_table(up["dir"] / "parameters_huckel.dat"),
+              "down": parse_parameter_table(dn["dir"] / "parameters_huckel.dat")}
+
+    def sp_bands(ch):
+        frac_R = {R: np.linalg.solve(ch["cell"].T, np.array(R)) for R in ch["blocks"]}
+        out_ = []
+        for kq in mesh:
+            ph = {R: np.exp(2j * np.pi * (kq @ f)) for R, f in frac_R.items()}
+            Hk = sum(ph[R] * (B[0] + ch["shift"] * B[1]) for R, B in ch["blocks"].items())
+            Sk = sum(ph[R] * B[1] for R, B in ch["blocks"].items())
+            out_.append(sl.eigh(Hk, Sk, eigvals_only=True))
+        return np.array(out_)
+    SP = {"up": sp_bands(up), "down": sp_bands(dn)}
+    near = {t: np.abs(SP[t]) < 3.0 for t in SP}                 # states within 3 eV of E_F (huckel-SP frame)
+
+    def eig_dump(prefix):
+        H = read_matrix_dump(f"{prefix}.HAM"); S = read_matrix_dump(f"{prefix}.OV")
+        return np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(H, S)])
+
+    def compare(nat, tag):
+        d = nat - SP[tag]
+        dn_ = d[near[tag]]
+        off = float(dn_.mean())
+        ok = SP[tag] < 15.0                                     # above: near-null directions of S(k)
+        return dict(energy_offset_eV=off, max_deviation_within_3eV_eV=float(np.abs(dn_ - off).max()),
+                    max_deviation_up_to_15eV_eV=float(np.abs(d[ok] - off).max()))
+
+    def channel(table, k, tag, tmp):
+        """Spinless bind run of one channel table on the mesh (same H as that channel of the spin run)."""
+        write_parameter_file(tmp / f"{tag}.dat", table)
+        inp = write_periodic_input_generic(poscar, tmp / f"{tag}.bind", None, k, True, nelec, overlap_images=images,
+                                           periodic_dim=dim, structure_format="vasp", kpoints=mesh)
+        run_bind(bind, inp, tmp / f"{tag}.dat", tmp / f"{tag}.log")
+        return eig_dump(tmp / f"{tag}.bind")
+
+    def spin_run(t_up, t_dn, tmp, label):
+        d = tmp / label; d.mkdir()
+        write_parameter_file(d / "up.dat", t_up); write_parameter_file(d / "down.dat", t_dn)
+        write_periodic_input_generic(poscar, d / "spin.bind", None, K["up"], True, nelec, overlap_images=images,
+                                     periodic_dim=dim, structure_format="vasp", kpoints=mesh, average_properties=True)
+        args = ["--parm-up", "up.dat", "--parm-down", "down.dat", "--const-up", f"{K['up']:.12g}",
+                "--const-down", f"{K['down']:.12g}", "--common-fermi"]
         cwd = os.getcwd()
         try:
-            os.chdir(tmp)
-            run_bind_args(bind, args, "spin.bind", None, tmp / "spin.log")
+            os.chdir(d)
+            run_bind_args(bind, args, "spin.bind", None, d / "spin.log")
         finally:
             os.chdir(cwd)
         spin = {}
-        for line in (tmp / "spin.bind.spin").read_text().splitlines():
+        for line in (d / "spin.bind.spin").read_text().splitlines():
             if line.startswith("#") and ":" in line:
                 k, v = line[1:].split(":", 1)
                 try:
                     spin[k.strip()] = float(v.split()[0])
                 except (ValueError, IndexError):
                     spin[k.strip()] = v.strip()
-        shutil.copy(tmp / "spin.bind.spin", keep / "spin.bind.spin")
-        checks = {}; counts = {}
-        for tag, ch in (("up", up), ("down", dn)):
-            H = read_matrix_dump(tmp / f"spin_{tag}.bind.HAM"); S = read_matrix_dump(tmp / f"spin_{tag}.bind.OV")
-            import scipy.linalg as sl
-            nat = np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(H, S)])
-            cell = ch["cell"]; n = ch["n"]
-            frac_R = {R: np.linalg.solve(cell.T, np.array(R)) for R in ch["blocks"]}
-            sp = []
-            for kq in mesh:
-                Hk = sum(np.exp(2j * np.pi * (kq @ frac_R[R])) * (B[0] + ch["shift"] * B[1]) for R, B in ch["blocks"].items())
-                Sk = sum(np.exp(2j * np.pi * (kq @ frac_R[R])) * B[1] for R, B in ch["blocks"].items())
-                sp.append(sl.eigh(Hk, Sk, eigvals_only=True))
-            # bands up to 15 eV above E_F: states far above come from the near-null directions of S(k)
-            # (smallest eigenvalue ~1e-3) and are very sensitive to the rounding of the written file
-            ef = spin.get("Fermi_Energy", spin.get(f"Fermi_Energy_{tag}"))
-            ok = nat <= (float(ef) if isinstance(ef, float) else np.median(nat)) + 15.0
-            counts[tag] = float((np.array(sp) < 0).sum() / len(mesh))   # states below E_F = 0 of huckel-SP.dat
-            d = (nat - np.array(sp))[ok]
-            checks[tag] = dict(energy_offset_eV=float(d.mean()), max_deviation_eV=float(np.abs(d - d.mean()).max()),
-                               bands_compared="up to 15 eV above the native Fermi level")
-    efer = spin.get("Fermi_Energy")
-    res = dict(command="bind " + " ".join(args) + " spin.bind", k_mesh=f"Gamma-centred {2 * mesh_radius + 1}^{dim}",
-               common_fermi_eV=efer, electrons_up=spin.get("ELECTRONS_UP"), electrons_down=spin.get("ELECTRONS_DOWN"),
-               magnetic_moment_per_cell=spin.get("MAGNETIC_MOMENT"), bands_vs_huckel_SP=checks,
-               huckel_SP_electrons_below_EF={**counts, "moment": counts["up"] - counts["down"]},
-               note="energy_offset_eV: native EHT energy minus huckel-SP.dat energy (constant per channel: the "
-                    "energy zero of the channel); max_deviation_eV checks that both give the same bands. The native "
-                    "--common-fermi run uses the ABSOLUTE EHT energies of the two tables, fitted separately; when the "
-                    "two offsets differ, its Fermi level, electron counts and moment differ from those of "
-                    "huckel-SP.dat, where both channels are aligned at the DFT Fermi level "
-                    "(huckel_SP_electrons_below_EF, same mesh)")
-    if efer is not None:
-        res["common_fermi_in_huckel_SP_frame_eV"] = {t: float(efer) - c["energy_offset_eV"] for t, c in checks.items()}
+        checks = {tag: compare(eig_dump(d / f"spin_{tag}.bind"), tag) for tag in ("up", "down")}
+        ef = spin.get("Fermi_Energy")
+        r = dict(command="bind " + " ".join(args) + " spin.bind", common_fermi_eV=ef,
+                 electrons_up=spin.get("ELECTRONS_UP"), electrons_down=spin.get("ELECTRONS_DOWN"),
+                 magnetic_moment_per_cell=spin.get("MAGNETIC_MOMENT"), bands_vs_huckel_SP=checks)
+        if ef is not None:
+            r["common_fermi_in_huckel_SP_frame_eV"] = {t: float(ef) - c["energy_offset_eV"] for t, c in checks.items()}
+        return r, d
+
+    def shifted(table, delta):
+        import copy
+        t2 = copy.deepcopy(table)
+        for el in t2.values():
+            for o in ("s", "p", "d", "f"):
+                if o in el:
+                    el[o]["Hii"] = float(el[o]["Hii"]) + delta
+        return t2
+
+    counts = {t: float((SP[t] < 0).sum() / len(mesh)) for t in SP}
+    res = dict(k_mesh=f"Gamma-centred {2 * mesh_radius + 1}^{dim}",
+               huckel_SP_electrons_below_EF={**counts, "moment": counts["up"] - counts["down"]})
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        raw, raw_dir = spin_run(tables["up"], tables["down"], tmp, "fitted")
+        res["fitted_tables"] = raw
+        final_dir, t_dn = raw_dir, tables["down"]
+        if align:
+            # the gap between the two offsets is split: up Hii - delta/2, down Hii + delta/2, so that each
+            # table moves half as much (smaller change of the band shape than shifting one channel)
+            def gap(delta):
+                ou = compare(channel(shifted(tables["up"], -delta / 2), K["up"], f"up{len(hist)}", tmp), "up")
+                od = compare(channel(shifted(tables["down"], delta / 2), K["down"], f"dn{len(hist)}", tmp), "down")
+                return od["energy_offset_eV"] - ou["energy_offset_eV"]
+            b = raw["bands_vs_huckel_SP"]
+            d0, f0 = 0.0, b["down"]["energy_offset_eV"] - b["up"]["energy_offset_eV"]
+            hist = [(d0, f0)]
+            d1 = -f0
+            for _ in range(8):
+                f1 = gap(d1)
+                hist.append((d1, f1))
+                if abs(f1) < 2e-4 or abs(f1 - f0) < 1e-12:
+                    break
+                d0, f0, d1 = d1, f1, d1 - f1 * (d1 - d0) / (f1 - f0)
+            delta = min(hist, key=lambda h: abs(h[1]))[0]
+            t_up, t_dn = shifted(tables["up"], -delta / 2), shifted(tables["down"], delta / 2)
+            ali, final_dir = spin_run(t_up, t_dn, tmp, "aligned")
+            res["aligned_tables"] = ali
+            res["alignment"] = dict(delta_Hii_up_eV=float(-delta / 2), delta_Hii_down_eV=float(delta / 2),
+                                    remaining_offset_difference_eV=float(min(abs(h[1]) for h in hist)),
+                                    search=[[float(a), float(c)] for a, c in hist])
+        for f_ in ("up.dat", "down.dat", "spin.bind", "spin.bind.spin"):
+            shutil.copy(final_dir / f_, keep / f_)
+        if align:
+            write_parameter_file(keep / "up_fit.dat", tables["up"])
+            write_parameter_file(keep / "down_fit.dat", tables["down"])
+    res["note"] = ("energy_offset_eV: native EHT energy minus huckel-SP.dat energy (per channel, states within 3 eV of "
+                   "E_F); fitted_tables: the two tables as fitted, whose absolute energies differ by an arbitrary constant "
+                   "(common Fermi level not physical); aligned_tables: Hii of each channel shifted (delta_Hii_up_eV, "
+                   "delta_Hii_down_eV) so both channels put the DFT Fermi level at the same EHT energy "
+                   "(yaehmop_spin/up.dat, down.dat); "
+                   "max_deviation_*: change of band shape against huckel-SP.dat")
     return res
 
 
@@ -147,6 +216,9 @@ def main():
     ap.add_argument("--outdir", type=Path, required=True)
     ap.add_argument("--no-native", action="store_true",
                     help="skip the native spin-polarized bind run (fork github.com/ac-dias/yaehmop)")
+    ap.add_argument("--no-align", action="store_true",
+                    help="native run with the two tables as fitted (their absolute EHT energies differ by an arbitrary "
+                         "constant); default: shift the spin-down Hii so that both channels share the energy zero")
     ap.add_argument("--mesh-radius", type=int, default=4,
                     help="native run: Gamma-centred k mesh of (2r+1)^dim points (default 4)")
     a = ap.parse_args()
@@ -204,17 +276,25 @@ def main():
                    spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero")
     if not a.no_native:
         try:
-            summary["native_spin"] = native_spin(up, dn, out, a.mesh_radius)
+            summary["native_spin"] = native_spin(up, dn, out, a.mesh_radius, align=not a.no_align)
         except Exception as exc:          # the joined file is already written; report, do not fail
             summary["native_spin"] = {"error": str(exc)}
         ns = summary["native_spin"]
-        if "bands_vs_huckel_SP" in ns:
-            dev = max(c["max_deviation_eV"] for c in ns["bands_vs_huckel_SP"].values())
-            print(f"NATIVE_SPIN bind --parm-up/--parm-down: bands = huckel-SP.dat within {dev:.1e} eV; "
-                  f"common Fermi {ns['common_fermi_eV']}, N_up {ns['electrons_up']}, N_down {ns['electrons_down']}, "
-                  f"moment {ns['magnetic_moment_per_cell']} per cell (huckel-SP.dat at E_F = 0: "
-                  f"N_up {ns['huckel_SP_electrons_below_EF']['up']:.3f}, N_down {ns['huckel_SP_electrons_below_EF']['down']:.3f})",
-                  flush=True)
+        if "fitted_tables" in ns:
+            hs = ns["huckel_SP_electrons_below_EF"]
+            for key in ("fitted_tables", "aligned_tables"):
+                if key not in ns:
+                    continue
+                r = ns[key]
+                dev = max(c["max_deviation_within_3eV_eV"] for c in r["bands_vs_huckel_SP"].values())
+                print(f"NATIVE_SPIN {key}: N_up {r['electrons_up']}, N_down {r['electrons_down']}, moment "
+                      f"{r['magnetic_moment_per_cell']} per cell; band shape vs huckel-SP.dat within {dev:.1e} eV "
+                      f"(+-3 eV of E_F)", flush=True)
+            if "alignment" in ns:
+                print(f"NATIVE_SPIN alignment: Hii shifted by {ns['alignment']['delta_Hii_up_eV']:+.4f} eV (up), "
+                      f"{ns['alignment']['delta_Hii_down_eV']:+.4f} eV (down); "
+                      f"huckel-SP.dat at E_F = 0: N_up {hs['up']:.3f}, N_down {hs['down']:.3f}, moment {hs['moment']:.3f}",
+                      flush=True)
         else:
             print("NATIVE_SPIN", ns, flush=True)
     (out / "fit_summary.json").write_text(json.dumps(summary, indent=2) + "\n")

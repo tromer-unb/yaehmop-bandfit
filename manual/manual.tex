@@ -294,16 +294,19 @@ It can be switched off in the window itself. \emph{File $\to$ YAeHMOP executable
 
 \begin{figure}[ht]\centering
 \includegraphics[width=\textwidth]{gui_figs/gui_image_fit.jpg}
-\caption{Fit to image: structure, band picture with thumbnail and INI form (fields with drop-down lists of typical
-values); on the right the fitted EHT bands drawn over the original picture.}\label{fig:gui-image}
+\caption{Fit to image (\cmd{examples/gui\_mos2}: MoS$_2$ monolayer, picture of the PBE top valence and bottom conduction
+band): structure, band picture with thumbnail and INI form (fields with drop-down lists of typical values); on the right the
+fitted EHT bands drawn over the original picture (RMSE 0.074~eV, gap error 0.001~eV, 4000 calls, 71~s).}\label{fig:gui-image}
 \end{figure}
 \begin{figure}[ht]\centering
 \includegraphics[width=\textwidth]{gui_figs/gui_progress.jpg}
-\caption{Fit to DFT (SIESTA Al$_2$O$_2$, package detected) with the live loss of the running fit.}\label{fig:gui-progress}
+\caption{Fit to DFT (SIESTA Al$_2$O$_3$ bilayer, package detected, settings of \cmd{validation/refine\_v1c3/cmaes-basis-8k.ini})
+with the live loss of the running fit.}\label{fig:gui-progress}
 \end{figure}
 \begin{figure}[ht]\centering
 \includegraphics[width=\textwidth]{gui_figs/gui_dft_results.jpg}
-\caption{Results of the finished fit: full comparison figure and metrics.}\label{fig:gui-results}
+\caption{Results of the finished fit (8000 calls, 2:52 min): full comparison figure and metrics (RMS within 2~eV of $E_F$
+0.075~eV, gap error $-0.006$~eV).}\label{fig:gui-results}
 \end{figure}
 \begin{figure}[ht]\centering
 \includegraphics[width=0.8\textwidth]{gui_figs/gui_compare_dialog.jpg}
@@ -313,8 +316,8 @@ values); on the right the fitted EHT bands drawn over the original picture.}\lab
 \includegraphics[width=\textwidth]{gui_figs/gui_family_editor.jpg}\\[4pt]
 \includegraphics[width=\textwidth]{gui_figs/gui_family.jpg}
 \caption{Family fit: manifest editor (shared settings, \cmd{defaults:}, members with their roles and per-member
-keys) and, below, the finished fit of two QE members and one test member (\cmd{alternating} optimizer,
-\cmd{overlap\_radius: auto}) with the family overview and the errors of every member.}\label{fig:gui-family}
+keys) and, below, one table for two silicon polymorphs (QE, LDA: diamond and wurtzite; CMA-ES 3000 + polish,
+\cmd{overlap\_radius: auto}, extra shells \cmd{auto}) with the family overview and the errors of every member.}\label{fig:gui-family}
 \end{figure}
 \clearpage
 
@@ -1081,9 +1084,14 @@ also runs the two channel tables together, \cmd{bind --parm-up up.dat --parm-dow
 --const-down $K_\downarrow$ --common-fermi}, on a $\Gamma$-centred mesh (\cmd{--mesh-radius}, default 4): the bands of each channel
 are checked against \cmd{huckel-SP.dat} (Fe: $6\times10^{-4}$~eV up to 15~eV above $E_F$) and the run gives the common Fermi
 level, the electrons of each channel and the moment (\cmd{native\_spin} in \cmd{fit\_summary.json}; input in
-\cmd{yaehmop\_spin/}; \cmd{--no-native} skips it). That run uses the \emph{absolute} EHT energies of the two tables, fitted
-separately, so its moment differs from that of \cmd{huckel-SP.dat}, where both channels are aligned at the DFT $E_F$: for Fe,
-1.95~$\mu_B$ natively against 2.26~$\mu_B$ in \cmd{huckel-SP.dat} (same mesh) and 2.24 in PBE. States more than 15~eV above
+\cmd{yaehmop\_spin/}; \cmd{--no-native} skips it). The two tables are fitted separately, each with its own energy zero, so their
+absolute EHT energies differ by an arbitrary constant and a common-Fermi run with them is not physical. By default they are
+\emph{aligned} first: all $H_{ii}$ of the up table are shifted by $-\delta/2$ and those of the down table by $+\delta/2$ (secant
+search on \cmd{bind} runs) until both put the DFT $E_F$ at the same EHT energy (\cmd{--no-align} keeps the fitted tables). A uniform
+$H_{ii}$ shift is not an exact rigid shift in EHT ($K$ and \cmd{THE CONST DIAG} weigh it), so the band shape changes a little
+(reported). For Fe: moment 1.95~$\mu_B$ with the fitted tables, 2.14~$\mu_B$ aligned ($\delta=0.63$~eV, band shape within 0.13~eV
+near $E_F$), 2.26~$\mu_B$ in \cmd{huckel-SP.dat} (same mesh) and 2.24 in PBE. A joint fit of the two channels with a common energy
+zero would remove the remaining difference. States more than 15~eV above
 $E_F$ come from the near-null directions of $S(k)$ (smallest eigenvalue $\sim10^{-3}$) and are not physical.
 
 % ================================================================ 6e

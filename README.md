@@ -86,6 +86,8 @@ environment) or from *File → YAeHMOP executable and parameters*.
 
 ![BandFit GUI: fit to a band picture](manual/gui_figs/gui_image_fit.jpg)
 
+*Above: MoS₂ monolayer fitted from an ordinary picture of its PBE bands ([examples/gui_mos2](examples/gui_mos2/README.md)); RMSE 0.074 eV, gap error 0.001 eV, about one minute.*
+
 **Layout.** Left: the list of tasks. Middle: the form of the chosen task. Right: the **Runs** panel
 (status, time, calls and best loss of every run; for the selected run its *Log*, the live *Progress*
 plot and the *Results*: all figures and the main metrics).
@@ -104,7 +106,8 @@ plot and the *Results*: all figures and the main metrics).
 **Fit to a picture of the bands** (task *Fit to image*): give the structure (CIF, POSCAR, QE, SIESTA,
 FHI-aims) and the picture (PNG/JPEG/TIFF/WebP) or CSV, the energy limits of the plot and the k path
 (or pick a *standard path*), *Preview* to check the extracted curves, then *Run fit*. At the end the
-fitted EHT bands are drawn over your own picture.
+fitted EHT bands are drawn over your own picture. Try it with `examples/gui_mos2/` (*Load INI* →
+`MoS2_2bands.ini`, structure `MoS2_monolayer.vasp`, picture `MoS2_PBE_2bands.png`).
 
 **Family fit** (one table for several systems): *Add DFT folders…* (several at once) or *Add picture
 member…*, set the role (train/test), weight and any per-member key in the table, the shared settings

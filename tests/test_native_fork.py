@@ -33,10 +33,19 @@ class NativeFork(unittest.TestCase):
                               "--down",str(FE/"spin_down"),"--outdir",tmp,"--mesh-radius","2"],capture_output=True,text=True)
             self.assertEqual(r.returncode,0,r.stdout[-2000:]+r.stderr[-2000:])
             ns=json.loads((Path(tmp)/"fit_summary.json").read_text())["native_spin"]
+            fit,ali=ns["fitted_tables"],ns["aligned_tables"]
             for ch in ("up","down"):
-                self.assertLess(ns["bands_vs_huckel_SP"][ch]["max_deviation_eV"],2e-3)
-            self.assertAlmostEqual(ns["electrons_up"]+ns["electrons_down"],8.0,places=3)
-            self.assertGreater(ns["huckel_SP_electrons_below_EF"]["moment"],1.0)   # bcc Fe is ferromagnetic
+                self.assertLess(fit["bands_vs_huckel_SP"][ch]["max_deviation_within_3eV_eV"],2e-3)
+            for r in (fit,ali):
+                self.assertAlmostEqual(r["electrons_up"]+r["electrons_down"],8.0,places=3)
+            # aligned: both channels share the energy zero, so the common Fermi level is the same in both frames
+            ef=ali["common_fermi_in_huckel_SP_frame_eV"]
+            self.assertAlmostEqual(ef["up"],ef["down"],places=3)
+            self.assertLess(ns["alignment"]["remaining_offset_difference_eV"],1e-3)
+            sp=ns["huckel_SP_electrons_below_EF"]["moment"]
+            self.assertGreater(sp,1.0)                                   # bcc Fe is ferromagnetic
+            self.assertLess(abs(ali["magnetic_moment_per_cell"]-sp),abs(fit["magnetic_moment_per_cell"]-sp))
+            self.assertTrue((Path(tmp)/"yaehmop_spin/down_fit.dat").is_file())
             self.assertTrue((Path(tmp)/"yaehmop_spin/spin.bind").is_file())
 
 if __name__=="__main__":unittest.main()

@@ -10,7 +10,7 @@ python band_fit_gui.py
 It needs PySide6 (`PySide6-Essentials`). `environment.yml` and `install.sh` install it;
 otherwise run `pip install PySide6-Essentials`.
 
-![BandFit GUI: fit to a band picture](../manual/gui_figs/gui_image_fit.jpg)
+![BandFit GUI: fit to a band picture (MoS₂, examples/gui_mos2)](../manual/gui_figs/gui_image_fit.jpg)
 
 ![Comparison window at the end of a fit](../manual/gui_figs/gui_compare_dialog.jpg)
 
@@ -90,5 +90,6 @@ prints the equivalent command line, so a run set up in the interface can be repe
   library clash with the conda matplotlib.
 - Developer check: `BANDFIT_GUI_SELFTEST=/tmp/gui python band_fit_gui.py` (with
   `QT_QPA_PLATFORM=offscreen` on a headless machine) fills the DFT and image tasks with repository
-  examples, runs short fits (DFT, picture, and a family of two QE members + one test member with the
-  `alternating` optimizer and `overlap_radius: auto`) and saves screenshots of every task.
+  examples, runs the fits shown in the figures (Al₂O₃ bilayer from SIESTA with the settings of the best
+  validated fit; the MoS₂ picture of `examples/gui_mos2`; a family of the two silicon polymorphs) and saves
+  screenshots of every task.

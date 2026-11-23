@@ -200,9 +200,15 @@ github.com/ac-dias/yaehmop (`--soc`) the final λ are then run natively (`native
 With the `bind` of the fork (`--parm-up/--parm-down`) the two tables also run together natively
 (`--common-fermi`, Γ-centred mesh `--mesh-radius 4`): per-channel bands checked against `huckel-SP.dat`,
 common Fermi level, electrons per channel and moment (`native_spin` in `fit_summary.json`; input in
-`yaehmop_spin/`); `--no-native` skips it. The native run uses the absolute EHT energies of the two
-separately fitted tables, so its moment can differ from that of `huckel-SP.dat` (both channels aligned
-at the DFT E_F; also reported). bcc Fe: native 1.95, `huckel-SP.dat` 2.26, DFT 2.24 μB.
+`yaehmop_spin/`); `--no-native` skips it. The two tables are fitted separately, each with its own energy
+zero, so their absolute EHT energies differ by an arbitrary constant and a common-Fermi run with them is not
+physical. By default the tables are **aligned** first: all Hii of the up table are shifted by −δ/2 and those
+of the down table by +δ/2 (secant search on `bind` runs) until both put the DFT E_F at the same EHT energy;
+the native run then uses the aligned tables (`yaehmop_spin/up.dat`, `down.dat`; the fitted ones as
+`*_fit.dat`). `--no-align` keeps the fitted tables. A uniform Hii shift is not an exact rigid shift in EHT
+(K and THE CONST DIAG weigh it), so the band shape changes a little; it is reported. bcc Fe: moment 1.95 μB
+with the fitted tables, **2.14 μB aligned** (δ = 0.63 eV, band shape within 0.13 eV of `huckel-SP.dat` near
+E_F), 2.26 in `huckel-SP.dat`, 2.24 in PBE.
 
 ## Shared prototype: `parameter_fitter/fit_shared.py`
 
