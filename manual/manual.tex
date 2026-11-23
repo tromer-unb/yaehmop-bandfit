@@ -254,8 +254,18 @@ middle and the \emph{Runs} panel on the right; the BandFit logo is at the top of
   spin-polarized run is flagged. \emph{Preview} shows the DFT bands; if they cross the Fermi level the interface
   offers the \cmd{metal} objective (section~\ref{sec:spin}). \emph{Fit both spins} fits the spin-up and spin-down
   channels at the same time and then runs \cmd{spin\_combine.py} (\cmd{huckel-SP.dat}).
+  \item \textbf{Family fit} (\cmd{family\_fit.py}): an editor of the manifest, so no YAML has to be typed
+  (figure~\ref{fig:gui-family}). \emph{Add DFT folders} adds several members at once (package detected; VASP
+  spin-polarized runs get \cmd{spin\_channel: average}); \emph{Add picture member} takes a structure, an INI and a
+  picture. The table holds every per-member key (role train/test, weight, spin channel, metallic, semicore,
+  overlap radius, objective weights such as \cmd{segment\_weights: '0:3'}); above it the shared settings
+  (\cmd{n\_pairs}, objective, overlap radius or \cmd{auto}, \cmd{basis\_add}, \cmd{basis\_dz}, \cmd{start\_from},
+  \cmd{objective\_settings}, \cmd{parallel}, \cmd{fast\_budget}) and the \cmd{defaults:} of the DFT members; the
+  mode is \emph{Fit}, \emph{Validate only}, \emph{Prepare only} or \emph{Evaluate an earlier fit}
+  (\cmd{--evaluate fit.json}). \emph{Run} saves the manifest and starts the command; the results show
+  \cmd{family\_overview.png}, the figures of every member and one line of errors per member.
   \item \textbf{Spin-orbit} (\cmd{soc\_fit.py}), \textbf{Spin combine} (\cmd{spin\_combine.py}), \textbf{Frozen
-  transfer}, \textbf{Family fit}, \textbf{Compare strategies} and \textbf{Image tools} (\cmd{prepare\_band\_png},
+  transfer}, \textbf{Compare strategies} and \textbf{Image tools} (\cmd{prepare\_band\_png},
   \cmd{inspect\_png}, \cmd{digitize\_bands}, \cmd{strategy\_advisor}).
 \end{itemize}
 
@@ -263,7 +273,8 @@ middle and the \emph{Runs} panel on the right; the BandFit logo is at the top of
 read in a separate process, so every command-line option is there (the less used ones in a collapsible
 \emph{All command-line options} panel, with the help text as tooltip) and new options appear without changing the
 interface. Free-text fields with typical values (budget, \cmd{basis\_add}, energy window, \cmd{band\_weights},
-colors, \cmd{soc\_shells}, overlap radius, \ldots) have a drop-down list of them and stay editable; in the DFT task the
+colors, \cmd{soc\_shells}, overlap radius or \cmd{auto}, \cmd{basis\_dz}, \cmd{segment\_weights}, \cmd{w\_split},
+\cmd{semicore}, \cmd{parallel}, \ldots) have a drop-down list of them and stay editable; in the DFT task the
 \cmd{dft\_file} list holds the band files found in the chosen folder. The two fit tasks also have a form for the INI file (\cmd{[reference]}, \cmd{[band\_path]},
 \cmd{[fit]}, \cmd{[objective]}), with \emph{Load INI}, \emph{Save INI} and \emph{Show INI}; command-line options
 override the INI, as in the terminal. \emph{Show command} prints the equivalent command line.
@@ -297,6 +308,13 @@ values); on the right the fitted EHT bands drawn over the original picture.}\lab
 \begin{figure}[ht]\centering
 \includegraphics[width=0.8\textwidth]{gui_figs/gui_compare_dialog.jpg}
 \caption{Window opened at the end of a fit: EHT bands on the original picture, fitted bands and errors.}\label{fig:gui-compare}
+\end{figure}
+\begin{figure}[ht]\centering
+\includegraphics[width=\textwidth]{gui_figs/gui_family_editor.jpg}\\[4pt]
+\includegraphics[width=\textwidth]{gui_figs/gui_family.jpg}
+\caption{Family fit: manifest editor (shared settings, \cmd{defaults:}, members with their roles and per-member
+keys) and, below, the finished fit of two QE members and one test member (\cmd{alternating} optimizer,
+\cmd{overlap\_radius: auto}) with the family overview and the errors of every member.}\label{fig:gui-family}
 \end{figure}
 \clearpage
 
@@ -664,6 +682,15 @@ direction and zero along inactive ones. Fit and recomputation use the same value
 \cmd{fit.json} and reused by \cmd{--from-fit} and \cmd{frozen\_transfer.py}. With 5 images the carbon
 test bands are converged to about $10^{-5}$ eV (4 images leave errors near 1~meV).
 
+\paragraph{Automatic radius (\cmd{overlap\_radius = auto}).} The cost of a YAeHMOP call grows quickly with the
+radius in 3D ($(2r+1)^3$ cells). With \cmd{--overlap-radius auto} (\cmd{[fit] overlap\_radius = auto}, or per member
+of a family) each system gets, before the fit, the smallest radius whose bands agree with those of
+\cmd{overlap\_radius\_max} (default 5) within \cmd{overlap\_radius\_tol} (default $10^{-3}$~eV), for the starting
+exponents and for exponents 20\% more diffuse, over the bands up to 8~eV above the highest occupied one. After
+the fit the fitted table is compared again with radius \cmd{overlap\_radius\_max} (warning above $10\times$ the
+tolerance). The radius used is stored in \cmd{fit.json} (\cmd{overlap\_radius\_by\_system}) and is the one of the
+exported H(R), S(R). Examples: anatase TiS$_2$ 3 (cost per call 1.13~s $\to$ 0.31~s), SiC 3--4, TiTe$_2$ slabs 3.
+
 \begin{aviso}[Fits made before the periodicity fix]
 Older versions always wrote \cmd{Lattice 2} (images \cmd{5 5 0}) during the fit, even with
 \cmd{dimension = 3}: a bulk crystal was fitted as a slab one cell thick, while the recomputation used
@@ -707,15 +734,46 @@ bayesian & Gaussian process (Mat\'ern 5/2 + noise) on $\log(\text{loss})$, expec
 cmaes & CMA-ES (package \cmd{cma}) started at the stock table & global \\
 genetic & real-coded GA: tournament, SBX crossover, polynomial mutation, elitism & global \\
 powell & bounded Powell from the stock table & local \\
+alternating & rounds of CMA-ES on all parameters (YAeHMOP calls, counted by \cmd{--budget}) alternated with CMA-ES on $H_{ii}$ and $K$ only, with the exponents frozen: $S(k)$ is cached and $H(k)=F(H_{ii},K)\circ S(k)$ is diagonalized in numpy (\cmd{--fast-budget}, default $10\times$ budget) & global \\
 \bottomrule
 \end{tabularx}
 \end{center}
 
-The last five run from the stock parameters with the whole budget and accept
+The global methods run from the stock parameters with the whole budget and accept
 \cmd{--polish nelder-mead} or \cmd{--polish powell}: a local refinement from the best distinct points
-found, using 25\% of the same budget. They were ported from \cmd{dftb\_sk\_gen}; there they evaluate
-batches in parallel, here evaluation is sequential. The Bayesian optimizer refits the Gaussian process
+found, using 25\% of the same budget. They were ported from \cmd{dftb\_sk\_gen}. The Bayesian optimizer refits the Gaussian process
 at every step and becomes slow above a few hundred calls; it pays off when calls are expensive.
+
+\paragraph{Parallel populations.} The population methods (DE, CMA-ES, GA, the Bayesian batch, \cmd{alternating}
+and the DE stage of the default) evaluate a whole generation at once: \cmd{--parallel N} candidates at the same
+time (default \cmd{auto} = CPUs / systems; \cmd{[fit] parallel}, environment \cmd{BANDFIT\_PARALLEL}), each with its
+systems in parallel. CMA-ES and GA follow exactly the sequential path (same result); DE uses scipy's
+\emph{deferred} updating. A would-be best candidate is still checked for the positive definiteness of $S(k)$ one at
+a time, in the order of the population (the result depends only on the exponents and is cached).
+
+\paragraph{Fast $H_{ii}$/$K$ stages.} In the weighted Wolfsberg--Helmholz formula the factor of $H_{ij}$ depends only on
+$H_{ii}$, $H_{jj}$ and $K$, and $S(k)$ only on the exponents. When only $H_{ii}$ and $K$ change, the program builds
+$H(k)$ from the cached $S(k)$ exactly as YAeHMOP does ($\Delta^4$ term; diagonal of the images of an orbital with
+\cmd{THE CONST DIAG} = 1.75) and solves the generalized eigenproblem with numpy, in forked processes. At the first use
+the result is checked against \cmd{bind}, also with other $H_{ii}$ and $K$ (agreement $10^{-5}$--$4\times10^{-4}$~eV; the
+fast path is switched off above $2\times10^{-3}$~eV). \cmd{--optimizer alternating} uses it.
+
+\begin{center}\small
+\begin{tabular}{lrr}
+\toprule
+Anatase TiS$_2$ (68 orbitals, 181 k points), 24 threads & time per evaluation & speed-up \\
+\midrule
+radius 5, sequential & 1133 ms & 1 \\
+radius auto (3), sequential & 314 ms & 3.6 \\
++ parallel population & 64 ms & 18 \\
+fast $H_{ii}$/$K$ stage (numpy, forked processes) & 13 ms & 87 \\
+\bottomrule
+\end{tabular}
+\end{center}
+With equal numbers of YAeHMOP calls, \cmd{alternating} reached lower losses than CMA-ES (SiC, 120 calls: 3.77 vs
+9.28; anatase TiS$_2$, 240 calls: 1.07 vs 1.71). At equal wall time it pays off when the lattice sums are expensive (3D,
+large radius); for 2D slabs, where a YAeHMOP call is already cheap (5L TiTe$_2$, 135 orbitals: 0.66~s with radius 3,
+numpy 0.32~s), CMA-ES with a parallel population is the better choice.
 
 \begin{center}
 \begin{tabular}{lrr}
@@ -734,8 +792,8 @@ bayesian & 0.26 & -- \\
 
 Diamond test of the table above: synthetic 3D EHT reference with $K=2.0$, 1V+1C. A start close to the
 answer favours the local default; wide, unknown landscapes are where the global methods are meant to
-help. In \cmd{family\_fit.py}, \cmd{--optimizer} accepts \cmd{nelder-mead} and the five global methods,
-plus \cmd{--polish}.
+help. \cmd{family\_fit.py} accepts every optimizer of the table, \cmd{--polish}, \cmd{--parallel} and
+\cmd{--fast-budget}.
 
 \subsection{Older fitters and alternative objectives}
 
@@ -748,7 +806,8 @@ Two older programs in \cmd{parameter\_fitter/} have fixed strategies of their ow
         $K$) and then the $H_{ii}$, and finally one Nelder--Mead over all parameters together. Sizes are
         set in the YAML under \cmd{shared: optimizer:} (\cmd{popsize}, \cmd{shape\_maxiter},
         \cmd{hii\_maxiter}, \cmd{shape\_local\_maxiter}, \cmd{hii\_local\_maxiter}, \cmd{joint\_maxiter},
-        \cmd{joint\_maxfev}).
+        \cmd{joint\_maxfev}). Like the other fitters it now writes, for every system,
+        \cmd{systems/<name>/bands\_comparison.png} and the standard \cmd{fitting/} export (H(R), S(R)).
   \item \cmd{fit\_from\_image.py} (first fitter, directly on a blue or dark-line image): differential
         evolution (\cmd{--maxiter 6}, \cmd{--popsize 5}) followed by Nelder--Mead
         (\cmd{--local-maxiter 160}). Its loss compares model and image curves in both directions:
@@ -944,6 +1003,13 @@ The I $5p$ value is close to the atomic one; \cmd{wtb.x} reproduces the EHT+SOC 
 to $3\times10^{-5}$~eV near the gap, with the same splitting at K. Limitations: the $\lambda$'s compensate part of the error
 of the spinless EHT (e.g.\ S $3p$ in the FHI-aims case); a joint fit of EHT parameters and $\lambda$'s is a possible next step.
 
+\paragraph{Native SOC of the fork.} The \cmd{bind} of \href{https://github.com/ac-dias/yaehmop}{github.com/ac-dias/yaehmop}
+has the same on-site $\lambda\,\mathbf{L}\cdot\mathbf{S}$ model (\cmd{bind --soc soc.dat}). \cmd{soc\_fit.py} fits the $\lambda$'s on the
+cached spinless $H(k)$, $S(k)$ (\cmd{--engine numpy}, default) and, with that \cmd{bind}, runs the final $\lambda$'s natively and
+compares the spinor bands (\cmd{native\_soc} in \cmd{fit\_summary.json}; MoS$_2$: $5\times10^{-9}$~eV). \cmd{fitting-soc/yaehmop\_soc/}
+holds \cmd{soc.dat}, the table and an input with the k points of the DFT path, to repeat the run (DOS, Fermi level and spin
+moments with SOC need only a k mesh and \cmd{Average Properties}). \cmd{--engine bind} makes every evaluation a native run.
+
 % ================================================================ 6d
 \section{Spin-polarized (collinear) references}\label{sec:spin}
 A collinear spin-polarized run is fitted channel by channel, giving one EHT parameter set per spin:
@@ -1009,6 +1075,16 @@ $\Gamma$ and H are those of the two channel fits.
 \paragraph{Export to WanTiBEXOS.} The tool already writes the Hamiltonian for WanTiBEXOS: \cmd{huckel-NP.dat} (spinless),
 \cmd{huckel-SOC.dat} (spin--orbit) and \cmd{huckel-SP.dat} (spin-polarized), each with its \cmd{basis\_set-*} file, read with
 \cmd{DFT= S}; the spinless and SOC files were checked with \cmd{wtb.x} (same bands as YAeHMOP to $10^{-4}$~eV).
+
+\paragraph{Native spin polarization of the fork.} With the \cmd{bind} of github.com/ac-dias/yaehmop, \cmd{spin\_combine.py}
+also runs the two channel tables together, \cmd{bind --parm-up up.dat --parm-down down.dat --const-up $K_\uparrow$
+--const-down $K_\downarrow$ --common-fermi}, on a $\Gamma$-centred mesh (\cmd{--mesh-radius}, default 4): the bands of each channel
+are checked against \cmd{huckel-SP.dat} (Fe: $6\times10^{-4}$~eV up to 15~eV above $E_F$) and the run gives the common Fermi
+level, the electrons of each channel and the moment (\cmd{native\_spin} in \cmd{fit\_summary.json}; input in
+\cmd{yaehmop\_spin/}; \cmd{--no-native} skips it). That run uses the \emph{absolute} EHT energies of the two tables, fitted
+separately, so its moment differs from that of \cmd{huckel-SP.dat}, where both channels are aligned at the DFT $E_F$: for Fe,
+1.95~$\mu_B$ natively against 2.26~$\mu_B$ in \cmd{huckel-SP.dat} (same mesh) and 2.24 in PBE. States more than 15~eV above
+$E_F$ come from the near-null directions of $S(k)$ (smallest eigenvalue $\sim10^{-3}$) and are not physical.
 
 % ================================================================ 6e
 \section{Validation: best fits}\label{sec:validation}
@@ -1087,9 +1163,14 @@ DFT members take, per member, under \cmd{defaults:} or in the \cmd{[reference]} 
 \cmd{spin\_channel}, \cmd{fermi}, \cmd{metallic}, \cmd{semicore}, \cmd{dimension}, \cmd{points\_per\_segment},
 \cmd{emin}, \cmd{emax}, an optional \cmd{structure} and \cmd{weight}. Global keys: \cmd{n\_pairs},
 \cmd{objective}, \cmd{objective\_settings}, \cmd{basis\_add}, \cmd{basis\_dz}, \cmd{start\_from}
-(+\cmd{start\_K}), \cmd{overlap\_radius}, \cmd{gap\_weight}, \cmd{reg\_weight}, \cmd{overlap\_min\_eig},
-\cmd{workers}. Options: every optimizer of \cmd{bands\_fit.py}, \cmd{--objective}, \cmd{--basis-add},
-\cmd{--basis-dz}, \cmd{--start-from}, \cmd{--workers} (members are computed in parallel), \cmd{--no-export}.
+(+\cmd{start\_K}), \cmd{overlap\_radius} (or \cmd{auto}), \cmd{gap\_weight}, \cmd{reg\_weight}, \cmd{overlap\_min\_eig},
+\cmd{workers}, \cmd{parallel}, \cmd{fast\_budget}, \cmd{alternating\_rounds}. Per member also \cmd{overlap\_radius} (bulk phases
+can use a smaller radius than slabs, or \cmd{auto}) and \cmd{objective\_settings}, merged over the global ones (e.g.
+\cmd{segment\_weights} only for slabs whose k path differs from the bulk one). Options: every optimizer of \cmd{bands\_fit.py},
+\cmd{--objective}, \cmd{--basis-add}, \cmd{--basis-dz}, \cmd{--start-from}, \cmd{--workers} (members are computed in parallel),
+\cmd{--parallel}, \cmd{--fast-budget}, \cmd{--no-export}. With \cmd{basis\_dz} and \cmd{start\_from} the diffuse tail starts
+almost equal to the inner function ($\zeta_2=\zeta_1-0.15$, $c_2/c_1=0.05$), so the first evaluation reproduces the starting
+table. The graphical interface has an editor for the manifest (section~\ref{sec:gui}).
 
 At least one training member is required; test members are optional (without them every error is a
 training error). Test references are read only after the vector is frozen, and their elements must appear
@@ -1187,7 +1268,9 @@ cif, input\_file & structure (any format of section~\ref{sec:structure}) and INI
 --seed & random seed (default 20261014) \\
 --from-fit fit.json & recompute all bands from a saved fit (runs the solver) \\
 --from-parameters, --k & recompute all bands from your table and $K$ \\
---overlap-radius & periodic images per active direction, 1--8 (default 5) \\
+--overlap-radius & periodic images per active direction, 1--8 (default 5), or \cmd{auto} \\
+--parallel & candidates of a population evaluated at the same time (default: CPUs / systems) \\
+--fast-budget & optimizer \cmd{alternating}: fast $H_{ii}$/$K$ evaluations (default $10\times$ budget) \\
 --name, --outdir & label and output folder \\
 \bottomrule
 \end{tabularx}

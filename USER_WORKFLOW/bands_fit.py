@@ -536,6 +536,29 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
     print("FITTING_DIR",fdir,flush=True)
     return fdir
 
+def radius_value(v):
+    """--overlap-radius / [fit] overlap_radius: an integer 1..8 or 'auto' (smallest converged radius)."""
+    if v is None:return None
+    if str(v).strip().lower()=="auto":return "auto"
+    r=int(v)
+    if r not in range(1,9):raise argparse.ArgumentTypeError("overlap radius must be 1..8 or auto")
+    return r
+
+# [fit] keys passed unchanged to fit_sparse_window (speed settings)
+SPEED_KEYS={"fast_budget":int,"alternating_rounds":int,"overlap_radius_tol":float,"overlap_radius_max":int,
+            "parallel":str,"workers":int,"fast_hamiltonian":lambda v:str(v).lower() not in ("0","no","false","off")}
+
+def speed_settings(fit,args=None):
+    out={k:f(fit.get(k)) for k,f in SPEED_KEYS.items() if fit.get(k,fallback=None) not in (None,"")}
+    if args is not None and getattr(args,"parallel",None):out["parallel"]=str(args.parallel)
+    if args is not None and getattr(args,"fast_budget",None):out["fast_budget"]=int(args.fast_budget)
+    return out
+
+def fitted_radius(radius,state,name):
+    """The radius actually used by the fit ('auto' resolved by fit_sparse_window)."""
+    if radius!="auto":return int(radius)
+    return int((state.get("overlap_radius_by_system") or {}).get(name,DEFAULT_OVERLAP_RADIUS))
+
 def run_optimizer(target,outdir,optimizer,budget,polish,seed,parser):
     """Run fit_sparse_window on fit_input.yaml; returns (initialization, refinement) calls."""
     core=[sys.executable,str(ROOT/"parameter_fitter/fit_sparse_window.py"),str(target)]
@@ -805,8 +828,8 @@ def dft_main(args,parser,config,inputs,dft_dir):
     print("DFT_REFERENCE",json.dumps(dict((k,info[k]) for k in ("code","formula","n_kpoints","n_bands",
           "occupied_bands","gap_on_path_eV","periodic_dim","yaehmop_path"))),flush=True)
     for note in ref.notes:print("NOTE",note,flush=True)
-    radius=args.overlap_radius or fit.getint("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS)
-    if radius not in range(1,9):parser.error("--overlap-radius must be in [1,8]")
+    try:radius=args.overlap_radius or radius_value(fit.get("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS))
+    except (ValueError,argparse.ArgumentTypeError):parser.error("[fit] overlap_radius must be 1..8 or auto")
     window=(ref_cfg.getfloat("emin",fallback=-6.),ref_cfg.getfloat("emax",fallback=6.))
     if args.validate_only or args.prepare_only:
         print("PREPARED_ONLY: review",refdir/"dft_bands_preview.png","before fitting.")
@@ -815,9 +838,12 @@ def dft_main(args,parser,config,inputs,dft_dir):
         if args.from_fit:
             st=json.loads(args.from_fit.resolve().read_text())
             K=float(st["best_x"]["GLOBAL__K"]);table=args.from_fit.resolve().parent/"param_best_native.dat"
+            if radius=="auto":radius=max((st.get("overlap_radius_by_system") or {}).values() or
+                                         [int(st["overlap_radius"]) if str(st.get("overlap_radius","")).isdigit() else DEFAULT_OVERLAP_RADIUS])
         else:
             if args.k is None:parser.error("--k is required with --from-parameters")
             K=args.k;table=args.from_parameters.resolve()
+        if radius=="auto":radius=DEFAULT_OVERLAP_RADIUS  # no fit to take it from
         entry["overlap_radius"]=radius
         if metallic:
             try:
@@ -844,7 +870,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
         obj,obj_set,basis_add=objective_config(args,config,"window")
     except ValueError as exc:
         parser.error(str(exc))
-    yml={"n_pairs":pairs,"points_per_line":step,"overlap_radius":int(radius),
+    yml={"n_pairs":pairs,"points_per_line":step,"overlap_radius":radius,**speed_settings(fit,args),
          "gap_weight":float(fit.get("gap_weight",".35")),"reg_weight":float(fit.get("reg_weight",".04")),
          "overlap_min_eig":float(fit.get("overlap_min_eig","1e-3")),
          "objective":obj,"objective_settings":obj_set,"basis_add":basis_add,
@@ -864,6 +890,7 @@ def dft_main(args,parser,config,inputs,dft_dir):
     target.write_text(yaml.safe_dump(yml,sort_keys=False))
     base_calls,refinement_calls=run_optimizer(target,outdir,optimizer,budget,polish,args.seed,parser)
     state=json.loads((outdir/"fit/fit.json").read_text())
+    radius=fitted_radius(radius,state,name)
     met=state["metrics"][name]
     bnpz=outdir/"fit"/f"{name}_bands.npz"
     if metallic:
@@ -928,14 +955,23 @@ def main():
     parser.add_argument("--from-parameters",type=Path,
                         help="Recompute full physical bands from original-YAeHMOP parameter table")
     parser.add_argument("--k",type=float,help="Required with --from-parameters")
-    parser.add_argument("--overlap-radius",type=int,default=None,
+    parser.add_argument("--overlap-radius",type=radius_value,default=None,
                         help="Overlap images in each active lattice direction, used by BOTH fitting and recomputation "
-                             f"(default: [fit] overlap_radius, else {DEFAULT_OVERLAP_RADIUS}; --from-fit reuses the fit's value)")
+                             f"(default: [fit] overlap_radius, else {DEFAULT_OVERLAP_RADIUS}; --from-fit reuses the fit's value); "
+                             "auto: smallest radius whose bands agree with radius [fit] overlap_radius_max (default 5) "
+                             "within [fit] overlap_radius_tol (default 1e-3 eV)")
+    parser.add_argument("--parallel",default=None,
+                        help="candidates evaluated at the same time by the population optimizers (DE, CMA-ES, GA, "
+                             "Bayesian, alternating): integer or auto (default: CPUs / systems; [fit] parallel)")
+    parser.add_argument("--fast-budget",type=int,default=None,
+                        help="optimizer alternating: evaluations of the fast Hii/K stages (cached S(k), numpy "
+                             "diagonalization; default 10 x budget; [fit] fast_budget)")
     parser.add_argument("--optimizer",choices=("nelder-mead","simulated-annealing",
                         "sa-nelder-mead","hooke-jeeves")+GLOBAL_METHODS,default=None,
                         help="nelder-mead (default) = short DE + NM; SA/HJ = 60%% DE+NM then refinement; "
                              "differential-evolution/bayesian/cmaes/genetic/powell = one global search "
-                             "from the stock parameters with the whole budget")
+                             "from the stock parameters with the whole budget; alternating = CMA-ES rounds on all "
+                             "parameters (YAeHMOP) alternated with fast Hii/K stages (cached S(k), numpy)")
     parser.add_argument("--polish",choices=POLISH_METHODS,default=None,
                         help="local refinement after a global optimizer (25%% of the budget)")
     parser.add_argument("--seed",type=int,default=20261014)
@@ -996,9 +1032,8 @@ def main():
     outdir=args.outdir.resolve();outdir.mkdir(parents=True,exist_ok=True)
     radius=args.overlap_radius
     if radius is None and not args.from_fit:
-        radius=fit.getint("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS)
-    if radius is not None and radius not in range(1,9):
-        parser.error("--overlap-radius must be in [1,8]")
+        try:radius=radius_value(fit.get("overlap_radius",fallback=DEFAULT_OVERLAP_RADIUS))
+        except (ValueError,argparse.ArgumentTypeError):parser.error("[fit] overlap_radius must be 1..8 or auto")
     if args.from_fit:
         source=args.from_fit.resolve()
         status=json.loads(source.read_text())
@@ -1007,8 +1042,9 @@ def main():
                   "Lattice (5,5,0) regardless of [band_path] dimension."+
                   (" This 3D recomputation will NOT reproduce that fit; refit."
                    if dim==3 else ""),file=sys.stderr)
-        if radius is None:
-            radius=int(status.get("overlap_radius",DEFAULT_OVERLAP_RADIUS))
+        if radius in (None,"auto"):
+            radius=max((status.get("overlap_radius_by_system") or {}).values() or
+                       [int(status["overlap_radius"]) if str(status.get("overlap_radius","")).isdigit() else DEFAULT_OVERLAP_RADIUS])
         saved_K=float(status["best_x"]["GLOBAL__K"])
         native=source.parent/"param_best_native.dat"
         if not native.is_file():raise FileNotFoundError(native)
@@ -1022,7 +1058,8 @@ def main():
         return
     if args.from_parameters:
         if args.k is None:parser.error("--k is required with --from-parameters")
-        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,radius,sfmt)
+        recompute(cif,config,args.from_parameters.resolve(),args.k,outdir,
+                  DEFAULT_OVERLAP_RADIUS if radius=="auto" else radius,sfmt)
         return
     image=args.png
     if image is None:
@@ -1074,7 +1111,7 @@ def main():
     if _obj!="frontier":
         parser.error("objective 'window' needs a numerical DFT reference (--dft-dir)")
     yml={"n_pairs":pairs,"points_per_line":step,"trace_nx":nx,
-         "overlap_radius":int(radius),"basis_add":basis_add,
+         "overlap_radius":radius,"basis_add":basis_add,**speed_settings(fit,args),
          "image_mode":"colored",
          "gap_weight":float(fit.get("gap_weight",".35")),
          "reg_weight":float(fit.get("reg_weight",".04")),
@@ -1090,6 +1127,7 @@ def main():
     target.write_text(yaml.safe_dump(yml,sort_keys=False))
     base_calls,refinement_calls=run_optimizer(target,outdir,optimizer,budget,polish,args.seed,parser)
     state=json.loads((outdir/"fit/fit.json").read_text())
+    radius=fitted_radius(radius,state,name)
     met=state["metrics"][name]
     objective_rmse=write_bands_plot(outdir/"fit"/f"{name}_bands.npz",outdir,2*pairs,
                 title=f"{name} — {pairs}VB + {pairs}CB (fit with {2*pairs} bands)")

@@ -82,7 +82,7 @@ def load_manifest(path):
         raise ValueError('Manifest requires systems: list')
     if int(a.get('n_pairs',1)) not in (1,2,3,4):raise ValueError('n_pairs must be 1..4')
     defaults=dict(a.get('defaults') or {})
-    unknown=set(defaults)-set(DFT_KEYS)-{'structure_format','mode','weight'}
+    unknown=set(defaults)-set(DFT_KEYS)-{'structure_format','mode','weight','overlap_radius'}
     if unknown:raise ValueError(f'unknown keys in defaults: {sorted(unknown)}')
     if defaults.get('dft_dir'):raise ValueError('dft_dir cannot be a default (one folder per system)')
     obj=a.get('objective')
@@ -104,6 +104,8 @@ def load_manifest(path):
         base_ini=ini.parent if ini is not None else path.parent
         weight=float(row.get('weight',defaults.get('weight',1.0)))
         if weight<=0:raise ValueError('Weight must be positive for '+name)
+        orad=row.get('overlap_radius',defaults.get('overlap_radius'))
+        if orad is not None:orad=_radius_value(orad)
         sfmt_req=row.get('structure_format',defaults.get('structure_format'))
         cif=(path.parent/str(row['structure'])).resolve() if row.get('structure') else None
         if cif is not None and not cif.is_file():raise FileNotFoundError('Structure missing for '+name+': '+str(cif))
@@ -118,9 +120,11 @@ def load_manifest(path):
             vals={k:_row_value(row,defaults,cfg,k) for k in DFT_KEYS if k not in ('dft_dir','dft_code')}
             sfmt=resolved_structure_format(cif,sfmt_req) if cif is not None else None
             symbols,sfile=_dft_symbols(Path(dft_dir),code,cif,sfmt)
+            if row.get('objective_settings') is not None:WindowSettings.from_dict(row['objective_settings'])
             entry={'name':name,'role':role,'kind':'dft','dft_dir':Path(dft_dir),'dft_code':code,
+                   'objective_settings':row.get('objective_settings'),
                    'cif':cif,'structure_format':sfmt,'structure_file':sfile,'ini':ini,'cfg':cfg,
-                   'symbols':symbols,'weight':weight,**vals}
+                   'symbols':symbols,'weight':weight,'overlap_radius':orad,**vals}
             if entry['spin_channel'] is not None and str(entry['spin_channel']).lower() not in ('up','down','average','mean'):
                 raise ValueError(f'{name}: spin_channel must be up, down or average')
         else:
@@ -133,7 +137,7 @@ def load_manifest(path):
             ref=cfg['reference']
             entry={'name':name,'role':role,'kind':'image','cif':cif,'structure_format':sfmt,'structure_file':cif,
                    'ini':ini,'cfg':cfg,'image':img,'symbols':read_structure(cif,sfmt).get_chemical_symbols(),
-                   'weight':weight,'image_mode':str(row.get('mode',ref.get('mode',defaults.get('mode','auto')))),
+                   'weight':weight,'overlap_radius':orad,'image_mode':str(row.get('mode',ref.get('mode',defaults.get('mode','auto')))),
                    'bbox':row.get('bbox',ref.get('bbox',fallback=None)),
                    'colors':row.get('colors',ref.get('colors',fallback=None))}
         (train if role=='train' else test).append(entry)
@@ -151,6 +155,13 @@ def load_manifest(path):
         if s['kind']=='dft' and str(s['dft_dir'].resolve()) in tdirs:
             raise ValueError('Heldout DFT folder is also a training folder: '+s['name'])
     return path,a,train,test
+
+def _radius_value(v):
+    """overlap_radius of the manifest or of one system: 1..8 or auto."""
+    if str(v).strip().lower()=='auto':return 'auto'
+    r=int(v)
+    if r not in range(1,9):raise ValueError('overlap_radius must be 1..8 or auto')
+    return r
 
 def _int(v):
     return None if v in (None,'') else int(v)
@@ -172,7 +183,9 @@ def preparation(row,out,pairs):
     if row.get('kind')=='dft':
         L=load_dft(row,out/'prepared'/row['name'],pairs)
         row['loaded']=L
-        return dict(L['entry'],weight=row['weight'])
+        e=dict(L['entry'],weight=row['weight'])
+        if row.get('objective_settings'):e['objective_settings']=dict(row['objective_settings'])
+        return e
     ref=row['cfg']['reference']
     prepared,qa=prepare(row['image'],out/'prepared'/row['name'],pairs,
         float(ref['emin']),float(ref['emax']),mode=row['image_mode'],
@@ -271,6 +284,12 @@ def build_training_config(m,train_entries,args,manifest_dir,radius):
         'basis_dz':args.basis_dz if args.basis_dz is not None else (m.get('basis_dz') or ''),
         'systems':train_entries}
     if args.workers or m.get('workers'):cfg['workers']=int(args.workers or m.get('workers'))
+    # speed settings (fit_sparse_window): parallel candidates, alternating optimizer, automatic radius
+    for key,conv in (('parallel',str),('fast_budget',int),('alternating_rounds',int),('overlap_radius_tol',float),
+                     ('overlap_radius_max',int),('fast_hamiltonian',bool)):
+        val=getattr(args,key,None)
+        if val is None:val=m.get(key)
+        if val is not None:cfg[key]=conv(val)
     start=args.start_from or m.get('start_from')
     if start:
         start=Path(start) if Path(str(start)).is_absolute() else csv_path(str(start),manifest_dir)
@@ -334,6 +353,10 @@ def main(argv=None):
     p.add_argument('--start-from',type=Path,default=None,
        help='fitting/ folder, fit/ folder or parameter table to start from (bounds centred there)')
     p.add_argument('--workers',type=int,default=None,help='systems evaluated in parallel (default: all, up to the CPUs)')
+    p.add_argument('--parallel',default=None,
+       help='candidates evaluated at the same time by the population optimizers (default auto: CPUs / systems)')
+    p.add_argument('--fast-budget',type=int,default=None,
+       help='optimizer alternating: evaluations of the fast Hii/K stages (cached S(k); default 10 x budget)')
     p.add_argument('--no-export',action='store_true',help='skip the per-system fitting/ export of H(R), S(R)')
     p.add_argument('--outdir',type=Path,default=Path('outputs/family_fit'))
     args=p.parse_args(argv)
@@ -356,13 +379,14 @@ def main(argv=None):
         print(json.dumps(report,indent=2))
         return
     out.mkdir(exist_ok=True,parents=True)
-    radius=int(m.get('overlap_radius',DEFAULT_OVERLAP_RADIUS))
+    try:radius=_radius_value(m.get('overlap_radius',DEFAULT_OVERLAP_RADIUS))
+    except ValueError as exc:p.error(str(exc))
     try:
         entries=[preparation(s,out,pairs) for s in train]
     except (ValueError,FileNotFoundError) as exc:
         p.error(str(exc))
     for s,e in zip(train,entries):
-        e['overlap_radius']=radius
+        e['overlap_radius']=s.get('overlap_radius') or radius
         if s['kind']=='dft':
             info=s['loaded']['info']
             print('PREPARED',s['name'],'metal' if info['metallic'] else f"gap {info['gap_on_path_eV']:.3f} eV",
@@ -387,7 +411,7 @@ def main(argv=None):
         mode_name='evaluation of an earlier fit (no optimization)'
     else:
         from fit_sparse_window import Fitter
-        probe=Fitter(training_config,generated.parent,out/'fit_probe')
+        probe=Fitter({**training_config,'_probe':True},generated.parent,out/'fit_probe')
         n_active=len(probe.names);probe.progress.close();shutil.rmtree(out/'fit_probe',ignore_errors=True)
         minbudget=minimum_staged_budget(n_active)
         if args.optimizer=='nelder-mead' and args.budget<minbudget:
@@ -401,9 +425,18 @@ def main(argv=None):
         mode_name='shared family fit'
     if not native.is_file():raise FileNotFoundError(native)
     K=float(saved['best_x']['GLOBAL__K'])
+    # radius of every system: the one the fit used ('auto' resolved there); systems not in the
+    # fit (test members, --evaluate of an older fit) use an integer setting or overlap_radius_max
+    rmax=int(m.get('overlap_radius_max',DEFAULT_OVERLAP_RADIUS))
+    used=saved.get('overlap_radius_by_system') or {}
+    def radius_of(s):
+        r=s.get('overlap_radius') or radius
+        return int(used[s['name']]) if s['name'] in used and r=='auto' else (rmax if r=='auto' else int(r))
+    radii={s['name']:radius_of(s) for s in train+test}
     frozen={'native_parameters':str(native),'K_EHT':K,
         'train_cif_sha256s':list(report['training_structure_sha256s'].values()),
-        'train_systems':report['training'],'overlap_radius':radius,'objective':training_config['objective']}
+        'train_systems':report['training'],'overlap_radius':max(radii.values()),'overlap_radius_by_system':radii,
+        'objective':training_config['objective']}
     (out/'shared_frozen_source.json').write_text(json.dumps(frozen,indent=2)+'\n')
     objset=training_config['objective_settings']
     results={};panels=[]
@@ -415,10 +448,12 @@ def main(argv=None):
         if args.evaluate or not npz.is_file():
             if s['kind']!='dft':raise RuntimeError(f"{s['name']}: no band file from the fit")
             w=sysdir/'eval';w.mkdir(parents=True,exist_ok=True)
+            e=dict(e,overlap_radius=radii[s['name']])
             bm=(evaluate_metal(e,native,K,w,s['name'],objset,_window(s)) if s['loaded']['metallic']
                 else evaluate_dft(e,native,K,w,s['name'],pairs,_window(s)))
             npz=w/f"{s['name']}_bands.npz"
-        met=_system_outputs(s,npz,sysdir,f"{s['name']} [train]",not args.no_export,native,param_txt,K,radius,pairs)
+        met=_system_outputs(s,npz,sysdir,f"{s['name']} [train]",not args.no_export,native,param_txt,K,
+                            radii[s['name']],pairs)
         for k in ('window_rms_eV','rms_within_2eV_of_EF_eV','rms_within_1eV_of_EF_eV','gap_error_eV','total'):
             if bm.get(k) is not None and k not in met:met[k]=bm[k]
         if isinstance(bm.get('window'),dict):
@@ -433,17 +468,17 @@ def main(argv=None):
             L=load_dft(s,hd/'dft_reference',pairs);s['loaded']=L
             unseen=set(L['ref'].atoms.get_chemical_symbols())-trained_elements
             if unseen:raise ValueError(f"{s['name']}: elements absent from training {sorted(unseen)}")
-            e=dict(L['entry'],overlap_radius=radius,role='test')
+            e=dict(L['entry'],overlap_radius=radii[s['name']],role='test')
             ev=(evaluate_metal(e,native,K,hd,s['name'],objset,_window(s)) if L['metallic']
                 else evaluate_dft(e,native,K,hd,s['name'],pairs,_window(s)))
             npz=hd/f"{s['name']}_bands.npz"
             met=_system_outputs(s,npz,out/'systems'/s['name'],f"{s['name']} [test, frozen]",
-                                not args.no_export,native,param_txt,K,radius,pairs)
+                                not args.no_export,native,param_txt,K,radii[s['name']],pairs)
             for k in ('window_rms_eV','rms_within_1eV_of_EF_eV','rms_within_2eV_of_EF_eV','gap_error_eV'):
                 if ev.get(k) is not None and k not in met:met[k]=ev[k]
         else:
             ev=evaluate(s['cif'],s['ini'],s['image'],native,K,hd,pairs,mode=s['image_mode'],bbox=s['bbox'],
-                        colors=s['colors'],overlap_radius=radius,source=frozen,structure_format=s['structure_format'])
+                        colors=s['colors'],overlap_radius=radii[s['name']],source=frozen,structure_format=s['structure_format'])
             met=dict(selected_rmse_eV=ev['selected_rmse_eV'])
         results[s['name']]=dict(role='test',kind=s['kind'],**met)
         if npz is not None and Path(npz).is_file():panels.append((s['name'],npz,'test',_metric_text(met)))

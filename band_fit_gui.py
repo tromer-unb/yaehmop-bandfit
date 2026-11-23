@@ -156,7 +156,9 @@ INI_SCHEMA = {
         ("dft_code", CODES, "DFT package of dft_dir"),
         ("dft_file", "str", "main band file inside dft_dir when there are several"),
         ("valence_bands", "int", "occupied DFT bands, if the automatic count is wrong"),
-        ("spin_channel", ["up", "down"], "one channel of a collinear spin-polarized run"),
+        ("spin_channel", ["up", "down", "average"],
+         "one channel of a collinear spin-polarized run; average = mean of both (spurious tiny magnetization)"),
+        ("semicore", "str", "lowest DFT bands dropped (semicore states absent from the EHT basis): auto, an integer or 0"),
         ("fermi", "float", "Fermi level (eV) replacing the one of the band files (metals: use the SCF one)"),
     ],
     "band_path": [
@@ -174,8 +176,19 @@ INI_SCHEMA = {
         ("optimizer", "OPTIMIZERS", "optimization method"),
         ("polish", ["nelder-mead", "powell"], "local refinement after a global optimizer"),
         ("basis_add", "str", "extra EHT shells, e.g. 'Al:d' or 'S:d H:p' or auto"),
+        ("basis_dz", "str", "shells made double-zeta (inner exponent + fitted diffuse tail), e.g. 'S:p Te:p'; "
+                            "s/p need the bind of github.com/ac-dias/yaehmop"),
         ("start_from", "dir", "fitting/ folder of an earlier fit to start from"),
-        ("overlap_radius", "int", "lattice images in each periodic direction"),
+        ("overlap_radius", "str", "lattice images in each periodic direction (1..8), or auto: the smallest radius "
+                                  "whose bands agree with overlap_radius_max within overlap_radius_tol"),
+        ("overlap_radius_max", "int", "auto radius: reference (largest) radius; default 5"),
+        ("overlap_radius_tol", "float", "auto radius: largest band difference accepted (eV); default 1e-3"),
+        ("parallel", "str", "candidates evaluated at the same time by DE/CMA-ES/GA/Bayesian/alternating; "
+                            "auto = CPUs / systems"),
+        ("fast_budget", "int", "optimizer alternating: evaluations of the fast Hii/K stages (cached S(k), numpy); "
+                               "default 10 x budget"),
+        ("alternating_rounds", "int", "optimizer alternating: rounds of (all parameters with YAeHMOP, then Hii/K "
+                                      "only); default 3"),
         ("overlap_min_eig", "float", "smallest eigenvalue of S(k) accepted (H, S exportable); default 1e-3"),
         ("gap_weight", "float", "frontier objective: weight of the gap error"),
         ("reg_weight", "float", "weight of the distance to the starting parameters"),
@@ -191,7 +204,13 @@ SUGGEST = {
     "colors": ["#1f77b4,#d62728", "#0000ff,#ff0000", "#1f77b4,#ff7f0e", "#000000"],
     "color_tolerance": ["20", "40", "60"],
     "points_per_segment": ["10", "15", "20", "30"],
-    "overlap_radius": ["3", "4", "5", "6"],
+    "overlap_radius": ["auto", "3", "4", "5", "6"],
+    "overlap_radius_max": ["5", "6"], "overlap_radius_tol": ["1e-3", "1e-4", "5e-3"],
+    "parallel": ["auto", "1", "4", "8", "12", "24"], "fast_budget": ["2000", "5000", "10000", "20000"],
+    "alternating_rounds": ["3", "2", "4", "5"], "workers": ["1", "2", "4", "8"],
+    "basis_dz": ["S:p", "Se:p", "Te:p", "S:p Te:p", "O:p", "Ti:d"],
+    "semicore": ["auto", "0", "1", "2", "4", "6"],
+    "segment_weights": ["0:3", "0:3 3:3", "0:4 3:4", "1:2"],
     "overlap_min_eig": ["1e-3", "1e-4", "0"],
     "gap_weight": ["0.35", "0", "1"], "reg_weight": ["0.04", "0", "0.1"],
     "window_min": ["-6", "-4", "-2.6", "-9"], "window_max": ["4", "3", "6", "12"],
@@ -228,7 +247,137 @@ SUGGEST["only"] = sorted(f"{q.parent.name}/{q.name}" for q in (ROOT / "validatio
 LOGO = ROOT / "assets/logo/bandfit_logo_dark.png"
 ICON = ROOT / "assets/logo/bandfit_icon_256.png"
 IMAGE_REF_KEYS = ["image", "mode", "emin", "emax", "trace_nx", "min_coverage", "bbox", "colors", "color_tolerance"]
-DFT_REF_KEYS = ["dft_dir", "dft_code", "dft_file", "valence_bands", "spin_channel", "fermi", "emin", "emax"]
+DFT_REF_KEYS = ["dft_dir", "dft_code", "dft_file", "valence_bands", "spin_channel", "semicore", "fermi", "emin", "emax"]
+
+
+# ============================================================================
+# 3. Family manifest (family_fit.py) <-> editor rows, without Qt (tested in tests/test_gui_specs.py)
+# ============================================================================
+FAMILY_COLS = ["name", "role", "dft_dir", "dft_code", "structure", "settings", "reference", "weight",
+               "spin_channel", "metallic", "semicore", "overlap_radius", "objective_settings"]
+FAMILY_GLOBAL = [  # key, kind, help
+    ("n_pairs", ["1", "2", "3", "4"], "valence and conduction bands each (figures; frontier objective)"),
+    ("objective", ["window", "metal", "frontier"],
+     "default: metal if a training member is metallic, window for DFT members, frontier for pictures"),
+    ("overlap_radius", "str", "lattice images per periodic direction (1..8) or auto (per system: column)"),
+    ("basis_add", "str", "extra EHT shells, e.g. 'S:d' or auto"),
+    ("basis_dz", "str", "double-zeta shells, e.g. 'S:p' (s/p: bind of github.com/ac-dias/yaehmop)"),
+    ("start_from", "dir", "fitting/ or fit/ folder (or a parameter table) to start from"),
+    ("objective_settings", "str", "window/metal weights for every member, e.g.  w_split: 100, n_cond: 4"),
+    ("parallel", "str", "candidates evaluated at the same time (auto = CPUs / systems)"),
+    ("fast_budget", "int", "optimizer alternating: fast Hii/K evaluations (default 10 x budget)"),
+    ("alternating_rounds", "int", "optimizer alternating: rounds (default 3)"),
+]
+FAMILY_DEFAULTS = [  # keys of `defaults:` (apply to every DFT member without its own value)
+    ("dft_code", CODES, "DFT package of the members"),
+    ("spin_channel", ["up", "down", "average"], "spin channel of spin-polarized members"),
+    ("semicore", "str", "semicore bands dropped: auto (default), an integer or 0"),
+    ("points_per_segment", "int", "YAeHMOP points per straight segment of the DFT path (default 20)"),
+]
+
+
+def _settings_text(d):
+    """{'w_split': 100, 'segment_weights': '0:3'} -> "w_split: 100, segment_weights: '0:3'"."""
+    if not d:
+        return ""
+    import yaml
+    return yaml.safe_dump(dict(d), default_flow_style=True, sort_keys=False).strip().strip("{}").strip()
+
+
+def _parse_settings(text):
+    """Inverse of _settings_text; '' -> None. Raises ValueError on a malformed text."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    import yaml
+    try:
+        d = yaml.safe_load("{" + text.strip("{}") + "}")
+    except yaml.YAMLError as exc:
+        raise ValueError(f"objective settings '{text}': {exc}") from None
+    if not isinstance(d, dict):
+        raise ValueError(f"objective settings '{text}' must be key: value pairs")
+    return d
+
+
+def family_manifest(glob, defaults, rows):
+    """Manifest dict for family_fit.py from the editor values (strings; empty = not set)."""
+    m = {}
+    for key, _, _ in FAMILY_GLOBAL:
+        v = (glob.get(key) or "").strip()
+        if not v:
+            continue
+        if key == "objective_settings":
+            m[key] = _parse_settings(v)
+        elif key in ("n_pairs", "fast_budget", "alternating_rounds"):
+            m[key] = int(v)
+        elif key == "overlap_radius":
+            m[key] = v if v.lower() == "auto" else int(v)
+        else:
+            m[key] = v
+    d = {k: (int(v) if k == "points_per_segment" else v) for k, v in
+         ((k, (defaults.get(k) or "").strip()) for k, _, _ in FAMILY_DEFAULTS) if v}
+    if d:
+        m["defaults"] = d
+    systems = []
+    for i, row in enumerate(rows, 1):
+        r = {k: str(row.get(k) or "").strip() for k in FAMILY_COLS}
+        if not any(r.values()):
+            continue
+        if not r["name"]:
+            raise ValueError(f"system {i}: name is empty")
+        s = {"name": r["name"]}
+        if r["role"] and r["role"] != "train":
+            s["role"] = r["role"]
+        for k in ("dft_dir", "dft_code", "structure", "settings", "reference", "spin_channel", "semicore"):
+            if r[k]:
+                s[k] = r[k]
+        if r["weight"]:
+            s["weight"] = float(r["weight"])
+        if r["metallic"] in ("true", "false"):
+            s["metallic"] = r["metallic"] == "true"
+        if r["overlap_radius"]:
+            s["overlap_radius"] = r["overlap_radius"] if r["overlap_radius"].lower() == "auto" else int(r["overlap_radius"])
+        if r["objective_settings"]:
+            s["objective_settings"] = _parse_settings(r["objective_settings"])
+        if not s.get("dft_dir") and not (s.get("structure") and s.get("settings")):
+            raise ValueError(f"system {r['name']}: give dft_dir (DFT member) or structure + settings (picture member)")
+        systems.append(s)
+    if not systems:
+        raise ValueError("add at least one system")
+    m["systems"] = systems
+    return m
+
+
+def family_rows(manifest, base):
+    """(globals, defaults, rows) editor values of a manifest; relative paths made absolute from `base`."""
+    base = Path(base)
+
+    def absolute(v):
+        return str(v) if Path(str(v)).expanduser().is_absolute() else str((base / str(v)).resolve())
+    glob = {}
+    for key, _, _ in FAMILY_GLOBAL:
+        v = manifest.get(key)
+        if v is None:
+            continue
+        glob[key] = _settings_text(v) if key == "objective_settings" else (absolute(v) if key == "start_from" else str(v))
+    defaults = {k: str(v) for k, v in (manifest.get("defaults") or {}).items() if k in dict((a, 1) for a, _, _ in FAMILY_DEFAULTS)}
+    rows = []
+    for s in manifest.get("systems") or []:
+        r = {k: "" for k in FAMILY_COLS}
+        for k in FAMILY_COLS:
+            v = s.get(k)
+            if v is None:
+                continue
+            if k in ("dft_dir", "structure", "settings", "reference"):
+                v = absolute(v)
+            elif k == "objective_settings":
+                v = _settings_text(v)
+            elif k == "metallic":
+                v = "true" if v else "false"
+            r[k] = str(v)
+        r["role"] = r["role"] or "train"
+        rows.append(r)
+    return glob, defaults, rows
 
 
 def detect_dft_code(folder):
@@ -535,9 +684,11 @@ def run_gui():
                 f = QtWidgets.QFormLayout(w)
                 if sec == "objective":
                     f.addRow(QtWidgets.QLabel("<i>Weights of the window / metal objectives; empty = default. "
-                                              "Named bands: band_weights = v1:10 c1:10 c2:5</i>"))
+                                              "Named bands: band_weights = v1:10 c1:10 c2:5; segments of the k path: "
+                                              "segment_weights = 0:3 3:3; neighbouring-band splittings: w_split</i>"))
                     for o in objective_fields:
-                        kind = "str" if o["name"] == "band_weights" else ("int" if o["name"] == "n_cond" else "float")
+                        kind = ("str" if o["name"] in ("band_weights", "segment_weights")
+                                else ("int" if o["name"] == "n_cond" else "float"))
                         fld = Field(kind, default=o["default"], suggest=SUGGEST.get(o["name"]))
                         f.addRow(o["name"], fld.widget)
                         self.fields[(sec, o["name"])] = fld
@@ -755,7 +906,23 @@ def run_gui():
                 dirs = [job.fitting_dir.parent / "spin_up", job.fitting_dir.parent / "spin_down"]
             tabs = QtWidgets.QTabWidget()
             seen = set()
-            for d in dirs:
+            family = job.outdir / "family_report.json" if job.outdir else None
+            if family is not None and family.is_file():
+                # family fit: the overview, then the full comparison of every member
+                dirs = [job.outdir]
+                if (job.outdir / "family_overview.png").is_file():
+                    v = ImageView(fit_height=True)
+                    v.show_file(str(job.outdir / "family_overview.png"))
+                    tabs.addTab(v, "Family overview")
+                for sd in sorted((job.outdir / "systems").glob("*")):
+                    for name in ("bands_full_comparison.png", "bands_comparison.png", "bands_on_original.png"):
+                        if (sd / name).is_file() and tabs.count() < 16:
+                            v = ImageView(fit_height=True)
+                            v.show_file(str(sd / name))
+                            tabs.addTab(v, sd.name)
+                            break
+                seen.add("*")
+            for d in ([] if "*" in seen else dirs):
                 pref = f"{d.name}: " if job.tool == "spin_combine" else ""
                 for name, title in self.FIGS:
                     f = d / name
@@ -793,6 +960,13 @@ def run_gui():
         def _summary(dirs):
             parts = []
             for d in dirs:
+                if (d / "family_report.json").is_file():
+                    try:
+                        rows = RunsPanel.family_rows(json.loads((d / "family_report.json").read_text()))
+                    except ValueError:
+                        rows = []
+                    return "<br>".join(f"<b>{k}</b>: {v:.4g}" if isinstance(v, float) else f"<b>{k}</b>: {v}"
+                                       for k, v in rows) or "Family fit finished."
                 f = d / "fit_summary.json"
                 if not f.is_file():
                     continue
@@ -962,7 +1136,7 @@ def run_gui():
                     self.ax.plot(*zip(*ok), ".", ms=2, color="0.65", label="trial")
                 self.ax.plot(calls, best, "-", color="#d62728", lw=1.6, label="best")
                 self.ax.set_yscale("log")
-                self.ax.set_xlabel("YAeHMOP call")
+                self.ax.set_xlabel("evaluation")
                 self.ax.set_ylabel("loss")
                 self.ax.legend(frameon=False, fontsize=8)
                 self.ax.set_title(f"{j.name}: best {best[-1]:.4g} after {calls[-1]} calls", fontsize=9)
@@ -991,13 +1165,13 @@ def run_gui():
         def _fill_results(self, j, keep=False):
             figs = []
             for d in self._result_dirs(j):
-                pats = ["*.png", "*/*.png", "*/*/*.png"]
+                pats = ["*.png", "*/*.png", "*/*/*.png", "systems/*/fitting/*.png"]
                 for pat in pats:
                     for p in sorted(d.glob(pat)):
                         if "/work/" in str(p) or p in figs:
                             continue
                         figs.append(p)
-            prefer = ["bands_on_original.png", "bands_full_comparison.png", "bands_comparison.png",
+            prefer = ["family_overview.png", "bands_on_original.png", "bands_full_comparison.png", "bands_comparison.png",
                       "extraction_preview.png", "dft_bands_preview.png"]
             figs.sort(key=lambda p: (prefer.index(p.name) if p.name in prefer else 9, len(p.parts)))
             cur = self.figsel.currentData() if keep else None
@@ -1020,10 +1194,42 @@ def run_gui():
             p = self.figsel.currentData()
             self.image.show_file(p if p else None)
 
+        @staticmethod
+        def family_rows(report):
+            """Metric rows of a family_report.json: shared values, then one row per member."""
+            rows = [(k, v) for k, v in (
+                ("mode", report.get("mode")), ("K_EHT", report.get("K_EHT")),
+                ("optimizer", report.get("optimizer")), ("budget", report.get("budget")),
+                ("evaluations", report.get("objective_optimizer_evaluations")),
+                ("mean objective without regularization", report.get("training_objective_without_regularization")),
+                ("basis added", report.get("basis_added")), ("double-zeta shells", report.get("basis_double_zeta")))
+                if v not in (None, "", {})]
+            for name, m in (report.get("systems") or {}).items():
+                bits = []
+                for lab, key in (("window RMS", "window_rms_eV"), ("RMSE", "selected_rmse_eV"),
+                                 ("±1 eV of E_F", "rms_within_1eV_of_EF_eV"), ("gap err", "gap_error_eV")):
+                    v = m.get(key)
+                    if isinstance(v, (int, float)):
+                        bits.append(f"{lab} {v:+.3f}" if key == "gap_error_eV" else f"{lab} {v:.3f}")
+                rows.append((f"{name} [{m.get('role', '')}]", ", ".join(bits) + " eV" if bits else ""))
+            return rows
+
         def _fill_metrics(self, j):
             rows = []
             summ = None
             src = None
+            for d in self._result_dirs(j):
+                if (d / "family_report.json").is_file():
+                    try:
+                        rep = json.loads((d / "family_report.json").read_text())
+                    except ValueError:
+                        break
+                    rows = self.family_rows(rep) + [("summary file", str(d / "family_report.json"))]
+                    self.metrics.setRowCount(len(rows))
+                    for r, (k, v) in enumerate(rows):
+                        self.metrics.setItem(r, 0, QtWidgets.QTableWidgetItem(k))
+                        self.metrics.setItem(r, 1, QtWidgets.QTableWidgetItem(f"{v:.4g}" if isinstance(v, float) else str(v)))
+                    return
             for d in self._result_dirs(j):
                 for name in ("fit_summary.json", "run_summary.json", "evaluation_summary.json", "dft_reference/dft_reference.json"):
                     if (d / name).is_file():
@@ -1372,7 +1578,7 @@ def run_gui():
 
         def hidden_args(self):
             return {"cif", "input_file", "outdir", "name", "png", "dft_dir", "dft_code", "dft_file",
-                    "valence_bands", "spin_channel"}
+                    "valence_bands", "spin_channel", "semicore", "dimension"}
 
         def defaults(self):
             for s, k, v in (("reference", "mode", "auto"), ("reference", "emin", "-6"), ("reference", "emax", "6"),
@@ -1525,6 +1731,310 @@ def run_gui():
                 jobs[ch].on_done.append(done)
                 self.win.runs.add(jobs[ch])
 
+    # ------------------------------------------------------------- family_fit tab
+    class FamilyTab(ToolTab):
+        """family_fit.py: manifest editor (members, roles, per-system settings) + every option."""
+        MODES = [("Fit", ["--fit"]), ("Validate only (no data read)", ["--validate-only"]),
+                 ("Prepare only (references, no fit)", ["--prepare-only"]),
+                 ("Evaluate an earlier fit (no optimization)", ["--evaluate"])]
+        COMBOS = {"role": ["train", "test"], "dft_code": [""] + CODES, "spin_channel": ["", "up", "down", "average"],
+                  "metallic": ["", "auto", "true", "false"]}
+        TIPS = {"name": "label of the member (folder name by default)", "role": "train: fitted; test: scored "
+                "after the fit with the frozen table", "dft_dir": "DFT band folder (DFT member)",
+                "dft_code": "package (empty: defaults / detected when added)",
+                "structure": "structure file: required for picture members, optional for DFT ones",
+                "settings": "INI of a picture member (axis, k path), as in Fit to image",
+                "reference": "band picture or CSV of a picture member (default: [reference] image of its INI)",
+                "weight": "weight in the shared objective (default 1)", "spin_channel": "up, down or average",
+                "metallic": "true/false; empty = detected", "semicore": "auto, integer or 0",
+                "overlap_radius": "1..8 or auto for this member (default: the global one)",
+                "objective_settings": "objective weights of this member only, e.g.  segment_weights: '0:3'"}
+
+        def __init__(self, win):
+            super().__init__(win)
+            self.spec = win.specs.get("family_fit", {})
+            lay = QtWidgets.QVBoxLayout(self)
+            inner = QtWidgets.QWidget()
+            il = QtWidgets.QVBoxLayout(inner)
+            lab = QtWidgets.QLabel(
+                "<b>Family fit.</b> One shared EHT table (and one K) for several materials: DFT band folders "
+                "(any package; gapped, metallic or spin-polarized) and band pictures with their INI, mixed freely. "
+                "<i>test</i> members are opened only after the fit and scored with the frozen table. Each member "
+                "gets its figures and fitting/ export in OUTDIR/systems/&lt;name&gt;/.")
+            lab.setWordWrap(True)
+            il.addWidget(lab)
+            # manifest file
+            g = QtWidgets.QGroupBox("Manifest (YAML)")
+            f = QtWidgets.QHBoxLayout(g)
+            self.f_manifest = Field("save", help="family YAML: written here before each run "
+                                                  "(empty: OUTDIR/family_manifest.yaml)")
+            b_load, b_save, b_view = (QtWidgets.QPushButton(x) for x in ("Load…", "Save", "Show YAML"))
+            b_load.clicked.connect(self.load)
+            b_save.clicked.connect(self.save)
+            b_view.clicked.connect(self.show_yaml)
+            f.addWidget(self.f_manifest.widget, 1)
+            for b in (b_load, b_save, b_view):
+                f.addWidget(b)
+            il.addWidget(g)
+            # global settings + defaults
+            g = QtWidgets.QGroupBox("Shared settings")
+            grid = QtWidgets.QHBoxLayout(g)
+            fl, fr = QtWidgets.QFormLayout(), QtWidgets.QFormLayout()
+            self.glob, self.defs = {}, {}
+            for key, kind, h in FAMILY_GLOBAL:
+                fld = Field(kind, help=h, suggest=SUGGEST.get(key) if key != "objective_settings"
+                            else ["w_split: 100", "n_cond: 4", "window_min: -4, window_max: 3"])
+                fl.addRow(key, fld.widget)
+                self.glob[key] = fld
+            fr.addRow(QtWidgets.QLabel("<i>defaults: of every DFT member</i>"))
+            for key, kind, h in FAMILY_DEFAULTS:
+                fld = Field(kind, help=h, suggest=SUGGEST.get(key))
+                fr.addRow(key, fld.widget)
+                self.defs[key] = fld
+            grid.addLayout(fl, 3)
+            grid.addLayout(fr, 2)
+            il.addWidget(g)
+            # members
+            g = QtWidgets.QGroupBox("Members")
+            gl = QtWidgets.QVBoxLayout(g)
+            self.table = QtWidgets.QTableWidget(0, len(FAMILY_COLS))
+            self.table.setHorizontalHeaderLabels(FAMILY_COLS)
+            for c, k in enumerate(FAMILY_COLS):
+                self.table.horizontalHeaderItem(c).setToolTip(self.TIPS.get(k, ""))
+            self.table.setMinimumHeight(190)
+            self.table.horizontalHeader().setStretchLastSection(True)
+            gl.addWidget(self.table)
+            row = QtWidgets.QHBoxLayout()
+            for text, fn, tip in (("Add DFT folders…", self.add_dft, "one member per folder; package detected"),
+                                  ("Add picture member…", self.add_image, "structure + INI (+ picture)"),
+                                  ("Duplicate", self.duplicate, "copy the selected member"),
+                                  ("Remove", self.remove, "remove the selected members")):
+                b = QtWidgets.QPushButton(text)
+                b.setToolTip(tip)
+                b.clicked.connect(fn)
+                row.addWidget(b)
+            row.addStretch(1)
+            gl.addLayout(row)
+            il.addWidget(g)
+            # mode + options
+            g = QtWidgets.QGroupBox("Run")
+            f = QtWidgets.QFormLayout(g)
+            self.mode = QtWidgets.QComboBox()
+            self.mode.addItems([m for m, _ in self.MODES])
+            self.f_eval = Field("file", help="fit.json of the earlier fit (param_best_native.dat next to it)")
+            f.addRow("mode", self.mode)
+            f.addRow("fit.json to evaluate", self.f_eval.widget)
+            self.f_eval.widget.setEnabled(False)
+            self.mode.currentIndexChanged.connect(lambda i: self.f_eval.widget.setEnabled(i == 3))
+            il.addWidget(g)
+            self.form = ArgForm(self.spec, primary=["outdir", "optimizer", "budget", "polish", "seed", "parallel",
+                                                    "fast_budget", "workers"],
+                                hide=["manifest", "validate_only", "prepare_only", "fit", "evaluate"],
+                                advanced_title="Other options")
+            il.addWidget(self.form)
+            il.addStretch(1)
+            lay.addWidget(self.scroll(inner), 1)
+            row = QtWidgets.QHBoxLayout()
+            self.cmdview = QtWidgets.QLineEdit()
+            self.cmdview.setReadOnly(True)
+            self.cmdview.setPlaceholderText("command line")
+            b_show = QtWidgets.QPushButton("Show command")
+            b_run = QtWidgets.QPushButton("Run")
+            b_run.setDefault(True)
+            row.addWidget(self.cmdview, 1)
+            row.addWidget(b_show)
+            row.addWidget(b_run)
+            lay.addLayout(row)
+            b_show.clicked.connect(lambda: self.command(show=True))
+            b_run.clicked.connect(self.run)
+            self.glob["n_pairs"].set("1")
+
+        # --- table
+        def _set_row(self, r, values):
+            for c, k in enumerate(FAMILY_COLS):
+                v = str(values.get(k, "") or "")
+                if k in self.COMBOS:
+                    w = QtWidgets.QComboBox()
+                    w.addItems(self.COMBOS[k])
+                    if v and w.findText(v) < 0:
+                        w.addItem(v)
+                    w.setCurrentText(v or self.COMBOS[k][0])
+                    w.setToolTip(self.TIPS.get(k, ""))
+                    self.table.setCellWidget(r, c, w)
+                else:
+                    it = QtWidgets.QTableWidgetItem(v)
+                    it.setToolTip(v or self.TIPS.get(k, ""))
+                    self.table.setItem(r, c, it)
+
+        def add_row(self, values):
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self._set_row(r, values)
+            self.table.resizeColumnsToContents()
+            return r
+
+        def row_values(self, r):
+            out = {}
+            for c, k in enumerate(FAMILY_COLS):
+                w = self.table.cellWidget(r, c)
+                if w is not None:
+                    out[k] = w.currentText()
+                else:
+                    it = self.table.item(r, c)
+                    out[k] = it.text() if it else ""
+            if out.get("metallic") == "auto":
+                out["metallic"] = ""
+            return out
+
+        def rows(self):
+            return [self.row_values(r) for r in range(self.table.rowCount())]
+
+        def add_dft(self):
+            dlg = QtWidgets.QFileDialog(self, "DFT band folders (select one or more)",
+                                        settings.value("last_dir", str(Path.home())))
+            dlg.setFileMode(QtWidgets.QFileDialog.Directory)
+            dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+            for view in dlg.findChildren((QtWidgets.QListView, QtWidgets.QTreeView)):
+                view.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+            if not dlg.exec():
+                return
+            names = {v["name"] for v in self.rows()}
+            for d in dlg.selectedFiles():
+                if not Path(d).is_dir():
+                    continue
+                name = Path(d).name
+                while name in names:
+                    name += "_2"
+                names.add(name)
+                vals = {"name": name, "role": "train", "dft_dir": d, "dft_code": detect_dft_code(d) or ""}
+                if vals["dft_code"] == "vasp" and vasp_is_spin_polarized(d) and not self.defs["spin_channel"].get():
+                    vals["spin_channel"] = "average"
+                self.add_row(vals)
+                settings.setValue("last_dir", str(Path(d).parent))
+
+        def add_image(self):
+            start = settings.value("last_dir", str(Path.home()))
+            s, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Structure file of the member", start)
+            if not s:
+                return
+            ini, _ = QtWidgets.QFileDialog.getOpenFileName(self, "INI of the member (axis, k path)", str(Path(s).parent),
+                                                           "INI (*.ini *.txt);;All files (*)")
+            if not ini:
+                return
+            img, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Band picture or CSV (Cancel: [reference] image of the INI)",
+                                                           str(Path(s).parent))
+            self.add_row({"name": Path(s).stem, "role": "train", "structure": s, "settings": ini, "reference": img or ""})
+
+        def duplicate(self):
+            for r in sorted({i.row() for i in self.table.selectedIndexes()}):
+                v = self.row_values(r)
+                v["name"] += "_copy"
+                self.add_row(v)
+
+        def remove(self):
+            for r in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
+                self.table.removeRow(r)
+
+        # --- manifest
+        def manifest(self):
+            return family_manifest({k: f.get() for k, f in self.glob.items()},
+                                   {k: f.get() for k, f in self.defs.items()}, self.rows())
+
+        def yaml_text(self):
+            import yaml
+            return "# written by band_fit_gui.py (Family fit)\n" + yaml.safe_dump(self.manifest(), sort_keys=False)
+
+        def manifest_path(self):
+            p = self.f_manifest.get()
+            if p:
+                return Path(p)
+            out = self.form.get("outdir") or "outputs/family_fit"
+            out = Path(out) if Path(out).is_absolute() else ROOT / out
+            return out / "family_manifest.yaml"
+
+        def save(self):
+            try:
+                text = self.yaml_text()
+            except ValueError as exc:
+                self.error(exc)
+                return None
+            p = self.manifest_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+            self.f_manifest.set(str(p))
+            return p
+
+        def show_yaml(self):
+            try:
+                text = self.yaml_text()
+            except ValueError as exc:
+                self.error(exc)
+                return
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("Family manifest")
+            dlg.resize(640, 520)
+            v = QtWidgets.QVBoxLayout(dlg)
+            e = QtWidgets.QPlainTextEdit(text)
+            e.setReadOnly(True)
+            e.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+            v.addWidget(e)
+            dlg.show()
+            self._dlg = dlg
+
+        def load(self, path=None):
+            import yaml
+            if not path:
+                path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Family manifest", settings.value("last_dir", str(Path.home())),
+                                                                "YAML (*.yaml *.yml);;All files (*)")
+            if not path:
+                return
+            try:
+                m = yaml.safe_load(Path(path).read_text())
+                glob, defs, rows = family_rows(m, Path(path).resolve().parent)
+            except Exception as exc:
+                self.error(f"{path}: {exc}")
+                return
+            for k, f in self.glob.items():
+                f.set(glob.get(k, ""))
+            for k, f in self.defs.items():
+                f.set(defs.get(k, ""))
+            self.table.setRowCount(0)
+            for r in rows:
+                self.add_row(r)
+            self.f_manifest.set(str(Path(path).resolve()))
+
+        # --- run
+        def command(self, show=False, manifest=None):
+            mode = self.MODES[self.mode.currentIndex()][1]
+            if mode == ["--evaluate"]:
+                if not Path(self.f_eval.get()).is_file():
+                    self.error("Choose the fit.json to evaluate")
+                    return None
+                mode = ["--evaluate", self.f_eval.get()]
+            try:
+                m = str(manifest or self.manifest_path())
+                cmd = [sys.executable, "-u", self.script("family_fit")] + self.form.tokens({"manifest": m})
+            except ValueError as exc:
+                self.error(exc)
+                return None
+            cmd[3:3] = mode
+            self.cmdview.setText(" ".join(shlex.quote(c) for c in cmd[2:]))
+            return cmd
+
+        def run(self):
+            p = self.save()
+            if p is None:
+                return
+            cmd = self.command(manifest=p)
+            if not cmd:
+                return
+            out = self.form.get("outdir") or "outputs/family_fit"
+            out = Path(out) if Path(out).is_absolute() else ROOT / out
+            if "--outdir" not in cmd:
+                cmd += ["--outdir", str(out)]
+            kind = "run" if self.mode.currentIndex() in (0, 3) else "preview"
+            self.win.runs.add(Job(out.name, "family_fit", cmd, outdir=out, kind=kind))
+
     # ------------------------------------------------------------- tools tab
     class ToolsTab(QtWidgets.QTabWidget):
         def __init__(self, win):
@@ -1606,9 +2116,7 @@ def run_gui():
             self.tabs.addTab(GenericTab(self, "frozen_transfer",
                                         "<b>Frozen transfer.</b> Apply fitted parameters to another structure "
                                         "without refitting (evaluation only)."), "Frozen transfer")
-            self.tabs.addTab(GenericTab(self, "family_fit",
-                                        "<b>Family fit.</b> One shared parameter set for several materials "
-                                        "(train/test roles in a YAML manifest)."), "Family fit")
+            self.tabs.addTab(FamilyTab(self), "Family fit")
             self.tabs.addTab(GenericTab(self, "compare_strategies",
                                         "<b>Compare strategies</b> on the validation examples (several protocols)."),
                              "Compare strategies")
@@ -1785,7 +2293,44 @@ def _selftest(app, w, out, QtCore):
             w.tabs.widget(0).fit()
             QtCore.QTimer.singleShot(1000, lambda: wait_image("fit"))
         else:
-            app.quit()
+            family()
+
+    def family():
+        # Family fit tab: two QE members (one test), alternating optimizer, automatic radius
+        i = [w.tabs.tabText(k) for k in range(w.tabs.count())].index("Family fit")
+        w.tabs.setCurrentIndex(i)
+        t = w.tabs.widget(i)
+        t.table.setRowCount(0)
+        t.add_row({"name": "Si_diamond", "role": "train", "dft_dir": str(ROOT / "validation/qe/Si_diamond_lda"),
+                   "dft_code": "qe"})
+        t.add_row({"name": "SiC", "role": "train", "dft_dir": str(ROOT / "validation/qe/SiC_zincblende_pbe"),
+                   "dft_code": "qe", "objective_settings": "w_split: 20"})
+        t.add_row({"name": "Si_wurtzite", "role": "test", "dft_dir": str(ROOT / "validation/qe/Si_wurtzite_lda"),
+                   "dft_code": "qe"})
+        t.glob["overlap_radius"].set("auto")
+        t.form.set("outdir", str(out / "runs/selftest_family"))
+        t.form.set("optimizer", "alternating")
+        t.form.set("budget", "120")
+        t.f_manifest.set(str(out / "runs/selftest_family.yaml"))
+        shot("family_filled")
+        t.run()
+        steps.append(time.time())
+        QtCore.QTimer.singleShot(1500, wait_family)
+
+    def wait_family():
+        j = w.runs.jobs[-1]
+        if j.status == "running" and time.time() - steps[-1] < 900:
+            QtCore.QTimer.singleShot(1000, wait_family)
+            return
+        w.runs.refresh_selected()
+        w.runs.tabs.setCurrentIndex(2 if j.status == "done" else 0)
+        shot("family_results")
+        for k, d in enumerate(getattr(w.runs, "_dialogs", [])):
+            if d.isVisible() and "family" in d.windowTitle():
+                app.processEvents()
+                d.grab().save(str(out / f"dialog_family_{k}.png"))
+        print("SELFTEST family", j.status, flush=True)
+        app.quit()
     QtCore.QTimer.singleShot(500, tabs)
 
 

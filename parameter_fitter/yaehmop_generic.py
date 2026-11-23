@@ -53,6 +53,32 @@ def run_bind(bind, input_file, param_file, log_file=None):
     check_double_zeta_sp(bind,input_file,param_file)
     return proc
 
+_FEATURES={}
+
+def bind_features(bind):
+    """Options of a bind binary: {'soc', 'spin', 'common_fermi'} for the fork github.com/ac-dias/yaehmop
+    (bind --help lists --soc / --parm-up / --common-fermi), empty for the original program."""
+    key=str(bind)
+    if key not in _FEATURES:
+        try:
+            out=subprocess.run([key,"--help"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=20).stdout
+        except (OSError,subprocess.SubprocessError):
+            out=""
+        _FEATURES[key]={f for f,flag in (("soc","--soc"),("spin","--parm-up"),("common_fermi","--common-fermi"))
+                        if flag in out}
+    return _FEATURES[key]
+
+def run_bind_args(bind, args, input_file, param_file=None, log_file=None):
+    """bind with extra options of the fork (e.g. --soc FILE, --parm-up/--parm-down); one BLAS thread."""
+    env=dict(os.environ)
+    for var in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):env.setdefault(var,"1")
+    cmd=[str(bind)]+[str(a) for a in args]+[str(input_file)]+([str(param_file)] if param_file else [])
+    proc=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env)
+    if log_file is not None: Path(log_file).write_text(proc.stdout)
+    if proc.returncode != 0:
+        raise RuntimeError(f"YAeHMOP bind failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stdout[-3000:]}")
+    return proc
+
 def _double_zeta_sp_shells(param_file):
     """(element, shell) of the s/p lines with Nzeta = 2 and a nonzero second coefficient."""
     out=[]
@@ -164,7 +190,7 @@ def contiguous_along_vacuum(atoms,periodic_dim):
     a.set_scaled_positions(frac)
     return a
 
-def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2,structure_format=None,kpoints=None):
+def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weighted_hij=True,electrons=None,overlap_images=(5,5,0),periodic_dim=2,structure_format=None,kpoints=None,average_properties=False):
     """cif_path: any structure file read by structure_io (CIF, VASP, QE, SIESTA, FHI-aims)."""
     from structure_io import read_structure
     cif_path,out_path=Path(cif_path),Path(out_path)
@@ -206,6 +232,7 @@ def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weight
         lines += ['','Dump Hamil','Dump Overlap','','K points',str(len(kpoints))]
         lines.extend(f"{k[0]: .12f} {k[1]: .12f} {k[2]: .12f} 1.0" for k in kpoints)
     if electrons is not None: lines += ['','electrons',str(int(electrons))]
+    if average_properties: lines += ['','Average Properties']
     lines.append(''); out_path.write_text('\n'.join(lines)); return out_path
 
 

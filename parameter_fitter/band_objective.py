@@ -431,7 +431,7 @@ def extend_basis(params, add):
     return p
 
 
-def make_double_zeta(params, spec, zeta2_factor=0.5, ratio=0.3):
+def make_double_zeta(params, spec, zeta2_factor=0.5, ratio=0.3, refine=False):
     """Turn single-zeta shells into contracted double-zeta ones (returns a copy).
 
     spec: "S:p Te:p" or {"S": ["p"]}. The existing exponent stays as the inner (contracted)
@@ -449,6 +449,10 @@ def make_double_zeta(params, spec, zeta2_factor=0.5, ratio=0.3):
             o = p[el][orb]
             if int(o["nzeta"]) == 2:
                 continue
-            o.update(nzeta=2, zeta2=max(0.5, zeta2_factor * float(o["zeta1"])), c1=1.0, c2=float(ratio))
+            z1 = float(o["zeta1"])
+            # refining a fitted table: tail almost equal to the inner function (the smallest gap allowed by
+            # physical_ok, zeta1 > zeta2 + 0.12) and small weight, so the start reproduces that table
+            z2 = max(0.5, z1 - 0.15) if refine else max(0.5, zeta2_factor * z1)
+            o.update(nzeta=2, zeta2=z2, c1=1.0, c2=float(ratio))
     return p
 

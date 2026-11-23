@@ -47,7 +47,7 @@ class GlobalOptimizerTests(unittest.TestCase):
 
     def test_every_method_respects_budget_and_improves(self):
         for method in GLOBAL_METHODS:
-            if not available(method):continue
+            if not available(method) or method=="alternating":continue  # needs a fast stage: own test
             with self.subTest(method=method):
                 budget=40 if method=="bayesian" else 90
                 r=self.check(method,budget)
@@ -85,3 +85,68 @@ class GlobalOptimizerTests(unittest.TestCase):
         with self.assertRaises(ValueError):polish(f,[],BOUNDS,10,"bfgs")
 
 if __name__=="__main__":unittest.main()
+
+
+def make_many(f):
+    """objective_many built from the sequential objective (as the Fitter does in threads)."""
+    batches=[]
+    def many(xs,eids,stage):
+        batches.append(len(xs))
+        out=[]
+        for x,eid in zip(xs,eids):
+            try:out.append(f(x,eid,stage))
+            except Exception as e:out.append((1e4,{"error":repr(e)}))
+        return out
+    return many,batches
+
+
+class ParallelPopulationTests(unittest.TestCase):
+    def test_batches_reproduce_the_sequential_search(self):
+        # CMA-ES and GA follow exactly the same path when a generation is evaluated at once
+        for method in ("cmaes","genetic"):
+            if not available(method):continue
+            with self.subTest(method=method):
+                f1,c1=make_objective();r1=run_global(method,f1,X0,BOUNDS,70,seed=5)
+                f2,c2=make_objective();many,batches=make_many(f2)
+                r2=run_global(method,f2,X0,BOUNDS,70,seed=5,objective_many=many,parallel=8)
+                self.assertTrue(max(batches)>1)
+                self.assertEqual(r1["best_loss"],r2["best_loss"])
+                self.assertEqual([h["loss"] for h in r1["history"]],[h["loss"] for h in r2["history"]])
+                self.assertEqual(r2["evaluations"],70)
+
+    def test_parallel_de_and_bayesian_respect_the_budget(self):
+        for method in ("differential-evolution","bayesian"):
+            if not available(method):continue
+            with self.subTest(method=method):
+                f,calls=make_objective(fail_every=7);many,batches=make_many(f)
+                budget=30 if method=="bayesian" else 60
+                r=run_global(method,f,X0,BOUNDS,budget,seed=2,objective_many=many,parallel=4)
+                self.assertLessEqual(len(calls),budget)
+                self.assertEqual(r["evaluations"],len(calls))
+                self.assertTrue(max(batches)>1)
+                self.assertLess(r["best_loss"],1e4)
+
+
+@unittest.skipUnless(HAS_CMA,"cma not installed")
+class AlternatingTests(unittest.TestCase):
+    def test_fast_stages_and_slow_budget(self):
+        f,calls=make_objective()
+        prepared=[]
+        def prepare(x):
+            prepared.append(np.asarray(x,float).copy());return True
+        r=run_global("alternating",f,X0,BOUNDS,60,seed=4,
+                     alternating=dict(fast_idx=[0,2],prepare=prepare,fast_budget=120,rounds=2))
+        self.assertEqual(r["slow_evaluations"],60)
+        self.assertEqual(r["fast_evaluations"],120)
+        self.assertEqual(len(prepared),3)            # before each fast stage
+        fast=[c for c,h in zip(calls,r["history"]) if h["stage"].startswith("fast")]
+        self.assertEqual(len(fast),120)
+        # a fast stage moves only the fast parameters (index 1 stays at the stage's start)
+        stage1=[c[0] for c,h in zip(calls,r["history"]) if h["stage"].startswith("fast1:")]
+        self.assertTrue(all(np.isclose(x[1],X0[1]) for x in stage1))
+        self.assertLess(r["best_loss"],.2)
+        self.assertAlmostEqual(r["best_loss"],min(h["loss"] for h in r["history"]))
+
+    def test_needs_the_fast_settings(self):
+        f,_=make_objective()
+        with self.assertRaises(ValueError):run_global("alternating",f,X0,BOUNDS,30)

@@ -149,7 +149,8 @@ another material) with the bounds centred there. Examples: `validation/refine/*.
 
 `--basis-dz "S:p"` (`[fit] basis_dz`, `basis_dz:` in a family manifest) makes a shell double
 zeta: its exponent becomes the inner function and a diffuse tail (ζ2 = ζ1/2, c2/c1 = 0.3 at the
-start) is added; ζ1, ζ2 and c2/c1 are fitted. Use it when one exponent cannot give both the bonds
+start; when refining an earlier fit with `--start-from`: ζ2 = ζ1 − 0.15 and c2/c1 = 0.05, so that the
+first evaluation stays close to that fit) is added; ζ1, ζ2 and c2/c1 are fitted. Use it when one exponent cannot give both the bonds
 inside a layer and the coupling across a van der Waals gap (splitting of the bands of the
 different layers of a slab). d and f shells work with the original YAeHMOP; s/p shells need a
 `bind` with double-zeta p, [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop)
@@ -164,14 +165,28 @@ the fork work with double-zeta p.
 objective wins everywhere; genetic + Nelder-Mead and CMA-ES + Nelder-Mead alternate as
 best; the extended basis is needed for Si, SiC, the nanoribbon and ZnI₂.
 
+## Faster fits
+
+* `overlap_radius = auto` (`[fit]`, `--overlap-radius auto`, per member in a family): the smallest
+  lattice-sum radius converged to `overlap_radius_tol` (1e-3 eV) against `overlap_radius_max` (5),
+  chosen per system before the fit and checked again on the fitted table. Bulk phases usually need
+  3–4, which cuts the cost of each YAeHMOP call by 4–7×.
+* The population optimizers evaluate a generation in parallel (`parallel`, default CPUs / systems).
+* `--optimizer alternating`: CMA-ES on all parameters (YAeHMOP) alternated with CMA-ES on Hii and K
+  only, where S(k) is cached and the bands come from numpy (H(k) = F(Hii, K) ∘ S(k)), checked
+  against `bind` at the first use. See [CLI_REFERENCE.md](CLI_REFERENCE.md#optimizers).
+
 ## Spin–orbit coupling (`USER_WORKFLOW/soc_fit.py`)
 
-YAeHMOP has no SOC. `soc_fit.py` adds on-site λ L·S per element and shell on top of a
+The original YAeHMOP has no SOC (the fork github.com/ac-dias/yaehmop has `bind --soc`, the same
+model). `soc_fit.py` adds on-site λ L·S per element and shell on top of a
 spinless fit (EHT parameters fixed) and fits the λ's against a DFT calculation with SOC
 (band window + spin-orbit splittings of the pairs near the gap). The spinor basis has
 the n orbitals with spin up first, then the same n with spin down. Outputs in
 `fitting-soc/`: `soc_parameters.txt`, `huckel-SOC.dat` + `basis_set-SOC` (WanTiBEXOS SOC
-format), figures, `fit_summary.json`.
+format), figures, `fit_summary.json`. The λ's are fitted on cached spinless H(k), S(k) in numpy;
+with the bind of the fork the final λ's are also run natively (`native_soc`, MoS₂: 5e-9 eV) and
+`yaehmop_soc/` keeps the input of `bind --soc` (`--engine bind` fits with native runs).
 
 ```bash
 python USER_WORKFLOW/soc_fit.py --dft-dir path/to/bands-soc --dft-code vasp \
@@ -185,7 +200,11 @@ occupied bands below the common Fermi level, each channel needs a gap). `spin_co
 --up FIT_UP --down FIT_DOWN --outdir OUT` joins both in one spinor basis (n spin-up orbitals,
 then the same n spin-down), with zero up-down blocks and each channel shifted by
 (DFT midgap of the channel − E_F) so that the exchange splitting of the DFT is kept. Output:
-`huckel-SP.dat` + `basis_set-SP` (WanTiBEXOS `SP` format).
+`huckel-SP.dat` + `basis_set-SP` (WanTiBEXOS `SP` format). With the bind of the fork, the two tables
+also run together (`bind --parm-up --parm-down --common-fermi`): bands of each channel checked against
+`huckel-SP.dat`, common Fermi level, electrons per channel, moment (`native_spin`; input in
+`yaehmop_spin/`). That native run uses the absolute EHT energies of the separately fitted tables (bcc Fe:
+moment 1.95 μB natively, 2.26 in `huckel-SP.dat` with both channels at the DFT E_F, DFT 2.24).
 
 ## Metals (`objective = metal`)
 

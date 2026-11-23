@@ -37,6 +37,11 @@ python3 parameter_fitter/fit_shared.py /path/to/config.yaml \
 
 **Important current limitation:** the expert prototype traces the reference using **the complete number of YAeHMOP orbitals**, not the N=2/4/6/8 selected frontier curves used by **USER_WORKFLOW/bands_fit.py**. Consequently, **a normal two-band MoS2 PNG is NOT a plug-and-play input to fit_shared.py**, and the layered 8-bit public converter cannot represent more than eight curves. Do not claim the generic multi-material case is production-ready merely because this command accepts YAML. First implement a unified N-band, source-verified multi-system objective and matching input contract. Running **--validate-only** only checks schema; it does not validate the numerical physical reference.
 
+Outputs (2026-11-23): besides `param_<tag>_native.dat` and `<tag>.json`, every system gets
+`OUTDIR/systems/<name>/bands_comparison.png/.csv` (traced reference blue, EHT red dashed) and the standard
+`fitting/` folder (parameters, POSCAR, H(R), S(R) in WanTiBEXOS format, `fit_summary.json`), as in
+`bands_fit.py` and `family_fit.py`; `--no-export` skips them.
+
 The specialized source-code experiment for carbon's true 2p double-zeta and independent pilot PySCF/GTH-SZV PBE references lives in the separate research branch/provenance, and is **not** an automatic arbitrary-element option in the public solver. In particular, a true carbon double-zeta p basis is an isolated patched YAeHMOP executable, distinct from the unmodified upstream solver.
 
 ## How to design a valid transfer experiment

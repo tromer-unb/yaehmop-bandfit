@@ -12,13 +12,20 @@ history. Searches run in the unit cube of the bounds, as in dftb_sk_gen.
 Evaluation is sequential here (the YAeHMOP objective writes per-call
 files), so batch methods use batch=1 unless asked otherwise.
 
+Parallel populations: when the caller gives objective_many(xs, eids, stage) ->
+[(loss, diagnostics), ...], the population methods (DE, CMA-ES, GA and the
+Bayesian batch) evaluate a whole generation in one call; the caller runs the
+candidates concurrently. CMA-ES and GA follow exactly the same path as the
+sequential run; DE switches to scipy's 'deferred' updating (required for a
+parallel population) and the Bayesian search proposes `batch` points at a time.
+
 Optional dependencies: scikit-learn (bayesian) and cma (cmaes).
 """
 from __future__ import annotations
 import math
 import numpy as np
 
-GLOBAL_METHODS = ("differential-evolution", "bayesian", "cmaes", "genetic", "powell")
+GLOBAL_METHODS = ("differential-evolution", "bayesian", "cmaes", "genetic", "powell", "alternating")
 POLISH_METHODS = ("nelder-mead", "powell")
 
 
@@ -29,7 +36,7 @@ class _Exhausted(Exception):
 class _Budget:
     """Strict call budget, history and best point, in the unit cube."""
 
-    def __init__(self, objective, bounds, budget, prefix=0):
+    def __init__(self, objective, bounds, budget, prefix=0, many=None):
         if budget < 1:
             raise ValueError("Budget must be positive")
         self.objective = objective
@@ -42,6 +49,7 @@ class _Budget:
         self.prefix = int(prefix)
         self.history = []
         self.best = [float("inf"), None]
+        self.many = many
 
     @property
     def used(self):
@@ -76,6 +84,45 @@ class _Budget:
             self.best[:] = [value, x.copy()]
         return value
 
+    def _record(self, x, eid, stage, value, metrics, error=None):
+        if error is None:
+            try:
+                value = float(value)
+                if not math.isfinite(value):
+                    raise ValueError("Nonfinite objective")
+            except Exception as e:
+                error = e
+        if error is not None:
+            value, entry = 1e4, {"eval": eid, "stage": stage, "loss": 1e4, "error": repr(error)}
+        else:
+            entry = {"eval": eid, "stage": stage, "loss": value, **dict(metrics)}
+        self.history.append(entry)
+        if value < self.best[0]:
+            self.best[:] = [value, x.copy()]
+        return value
+
+    def batch(self, us, stage):
+        """Evaluate several points (in parallel when objective_many was given), in order.
+
+        Points beyond the budget are not evaluated; _Exhausted is raised after the
+        affordable ones are recorded, as in the sequential path."""
+        us = [np.asarray(u, float) for u in us]
+        if self.many is None or len(us) < 2:
+            return [self(u, stage) for u in us]
+        take = us[:max(0, self.left)]
+        if not take:
+            raise _Exhausted
+        xs = [self.to_x(u) for u in take]
+        eids = [self.prefix + self.used + 1 + i for i in range(len(take))]
+        try:
+            outs = list(self.many([x.copy() for x in xs], eids, stage))
+        except Exception as e:  # the whole batch failed: every candidate is a bad point
+            outs = [(1e4, {"error": repr(e)})] * len(take)
+        vals = [self._record(x, eid, stage, v, m) for x, eid, (v, m) in zip(xs, eids, outs)]
+        if len(take) < len(us):
+            raise _Exhausted
+        return vals
+
     def result(self, method, message, **extra):
         return {"best_x": self.best[1], "best_loss": self.best[0], "evaluations": self.used,
                 "sweeps": None, "history": self.history, "method": method,
@@ -95,16 +142,20 @@ def _seed_u(b, x0):
 
 
 def differential_evolution_minimize(objective, x0, bounds, budget=300, seed=20261014,
-                                    popsize=6, prefix=0):
+                                    popsize=6, prefix=0, objective_many=None):
     """Full scipy DE (population popsize x dimension, Latin hypercube) until the budget."""
     from scipy.optimize import differential_evolution
-    b = _Budget(objective, bounds, budget, prefix)
+    b = _Budget(objective, bounds, budget, prefix, objective_many)
     d = len(bounds)
+    par = {} if objective_many is None else {
+        "updating": "deferred", "workers": lambda func, pop: b.batch(list(pop), "de")}
 
     def body():
+        kw = dict(updating="immediate", workers=1)
+        kw.update(par)
         r = differential_evolution(lambda u: b(u, "de"), [(0.0, 1.0)] * d, popsize=popsize,
                                    maxiter=10 ** 6, seed=seed, x0=_seed_u(b, x0), polish=False,
-                                   init="latinhypercube", updating="immediate", workers=1, tol=1e-6)
+                                   init="latinhypercube", tol=1e-6, **kw)
         return str(r.message)
     return b.result("differential-evolution", _run(b, body), popsize=popsize * d)
 
@@ -117,7 +168,7 @@ def _expected_improvement(mu, sigma, best, xi):
 
 
 def bayesian_minimize(objective, x0, bounds, budget=120, seed=20261014, n_init=None,
-                      batch=1, xi=0.01, prefix=0):
+                      batch=1, xi=0.01, prefix=0, objective_many=None):
     """GP (Matern 5/2 + white noise) on log(loss), expected improvement, constant liar for batch > 1."""
     from scipy.optimize import minimize
     from scipy.stats import qmc
@@ -129,7 +180,7 @@ def bayesian_minimize(objective, x0, bounds, budget=120, seed=20261014, n_init=N
         raise ImportError("optimizer 'bayesian' needs scikit-learn: pip install scikit-learn") from e
     import warnings
     warnings.filterwarnings("ignore", category=ConvergenceWarning)
-    b = _Budget(objective, bounds, budget, prefix)
+    b = _Budget(objective, bounds, budget, prefix, objective_many)
     d = len(bounds)
     rng = np.random.default_rng(seed)
     batch = max(1, int(batch))
@@ -138,8 +189,10 @@ def bayesian_minimize(objective, x0, bounds, budget=120, seed=20261014, n_init=N
     U, Y = [], []
 
     def run(points):
-        for u in points:
-            Y.append(b(u, "bo-init" if len(U) < n_init else "bo"))
+        stage = "bo-init" if len(U) < n_init else "bo"
+        vals = b.batch(list(points), stage)  # records the affordable ones before stopping
+        for u, v in zip(points, vals):
+            Y.append(v)
             U.append(np.asarray(u, float))
 
     kernel = (ConstantKernel(1.0, (1e-3, 1e3)) *
@@ -185,13 +238,13 @@ def bayesian_minimize(objective, x0, bounds, budget=120, seed=20261014, n_init=N
 
 
 def cmaes_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=None,
-                   sigma0=0.25, prefix=0):
+                   sigma0=0.25, prefix=0, objective_many=None):
     """CMA-ES (package cma) in the unit cube, started at x0."""
     try:
         import cma
     except ImportError as e:
         raise ImportError("optimizer 'cmaes' needs the cma package: pip install cma") from e
-    b = _Budget(objective, bounds, budget, prefix)
+    b = _Budget(objective, bounds, budget, prefix, objective_many)
     d = len(bounds)
     u0 = b.to_u(x0) if x0 is not None else np.full(d, 0.5)
     opts = {"bounds": [0.0, 1.0], "seed": int(seed) % (2 ** 31 - 1) or 1, "verbose": -9,
@@ -205,7 +258,7 @@ def cmaes_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=Non
         b(u0, "cmaes-x0")  # baseline: the start point itself, as in the other methods
         while not es.stop():
             sols = es.ask()
-            vals = [b(u, "cmaes") for u in sols]  # may stop mid-generation at the budget
+            vals = b.batch(sols, "cmaes")  # may stop mid-generation at the budget
             es.tell(sols, vals)
             state["g"] += 1
         return f"CMA-ES: population {es.popsize}, {state['g']} generations ({es.stop()})"
@@ -213,10 +266,11 @@ def cmaes_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=Non
 
 
 def genetic_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=None,
-                     crossover_prob=0.9, eta_c=15.0, eta_m=20.0, elite=2, prefix=0):
+                     crossover_prob=0.9, eta_c=15.0, eta_m=20.0, elite=2, prefix=0,
+                     objective_many=None):
     """Real-coded GA: tournament selection, SBX crossover, polynomial mutation, elitism."""
     from scipy.stats import qmc
-    b = _Budget(objective, bounds, budget, prefix)
+    b = _Budget(objective, bounds, budget, prefix, objective_many)
     d = len(bounds)
     rng = np.random.default_rng(seed)
     popsize = int(popsize or max(4, 6 * d))
@@ -228,7 +282,7 @@ def genetic_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=N
         pop = qmc.LatinHypercube(d=d, seed=seed).random(popsize)
         if x0 is not None:
             pop[0] = b.to_u(x0)
-        fit = np.array([b(u, "ga-init") for u in pop])
+        fit = np.array(b.batch(list(pop), "ga-init"))
         while True:
             order = np.argsort(fit)
             children = [pop[i].copy() for i in order[:elite]]
@@ -254,9 +308,7 @@ def genetic_minimize(objective, x0, bounds, budget=300, seed=20261014, popsize=N
                                          else 1 - (2 * (1 - mu)) ** (1 / (eta_m + 1)))
                     children.append(np.clip(child, 0, 1))
             children = np.array(children[:popsize])
-            new = []
-            for u in children[elite:]:
-                new.append(b(u, f"ga-gen-{state['g'] + 1}"))
+            new = b.batch(list(children[elite:]), f"ga-gen-{state['g'] + 1}")
             pop, fit = children, np.concatenate([fit[order[:elite]], new])
             state["g"] += 1
     return b.result("genetic", _run(b, body), popsize=popsize, generations=state["g"])
@@ -321,9 +373,74 @@ def polish(objective, history, bounds, budget, method="nelder-mead", n_starts=4,
             "history": out_hist, "starts": len(seeds)}
 
 
+def alternating_minimize(objective, x0, bounds, budget, fast_idx, prepare, fast_budget=None,
+                         rounds=3, seed=20261014, objective_many=None, sigma_slow=(0.25, 0.12, 0.06)):
+    """Alternating search for EHT tables (H = F(Hii, K) o S):
+
+    fast stage: CMA-ES on Hii and K only, with the exponents frozen, so that S(k) is cached
+      and each evaluation is a numpy diagonalization (prepare(x) builds the cache; it returns
+      False when the fast path is unavailable, and the stage then costs normal evaluations);
+    slow stage: CMA-ES on every parameter (YAeHMOP runs), shrinking step per round.
+    `budget` counts the slow (YAeHMOP) evaluations; `fast_budget` (default 10 x budget) the
+    fast ones, split over rounds + 1 fast stages (the last one after the final slow stage)."""
+    x = np.asarray(x0, float).copy()
+    fast_idx = np.asarray(sorted(fast_idx), int)
+    fast_budget = int(fast_budget if fast_budget is not None else 10 * budget)
+    rounds = max(1, int(rounds))
+    per_fast = max(10, fast_budget // (rounds + 1))
+    slow_share = [budget // rounds + (1 if r < budget % rounds else 0) for r in range(rounds)]
+    history, best = [], [float("inf"), x.copy()]
+    fast_used = slow_used = 0
+
+    def add(res, stage):
+        for row in res["history"]:
+            row["stage"] = stage + ":" + str(row.get("stage"))
+            row["eval"] = len(history) + 1
+            history.append(row)
+        if res["best_x"] is not None and res["best_loss"] < best[0]:
+            best[:] = [res["best_loss"], np.asarray(res["best_x"], float).copy()]
+
+    def fast_stage(k):
+        nonlocal fast_used
+        xb = best[1] if best[1] is not None else x
+        ok = prepare(xb)
+        sub_b = [bounds[i] for i in fast_idx]
+
+        def full(xf):
+            z = xb.copy()
+            z[fast_idx] = xf
+            return z
+
+        def g(xf, eid, stage):
+            return objective(full(xf), eid, stage)
+
+        def gm(xfs, eids, stage):
+            return objective_many([full(v) for v in xfs], eids, stage)
+        n = per_fast if ok else max(10, min(per_fast, slow_share[0] // 2))
+        res = cmaes_minimize(g, xb[fast_idx], sub_b, budget=n, seed=seed + 7 * k, sigma0=0.15,
+                             objective_many=gm if objective_many else None)
+        res["best_x"] = None if res["best_x"] is None else full(res["best_x"])
+        add(res, f"fast{k + 1}" + ("" if ok else "-nocache"))
+        fast_used += res["evaluations"]
+
+    fast_stage(0)
+    for r in range(rounds):
+        res = cmaes_minimize(objective, best[1], bounds, budget=slow_share[r], seed=seed + 101 * (r + 1),
+                             sigma0=sigma_slow[min(r, len(sigma_slow) - 1)], objective_many=objective_many)
+        add(res, f"slow{r + 1}")
+        slow_used += res["evaluations"]
+        fast_stage(r + 1)
+    return {"best_x": best[1], "best_loss": best[0], "evaluations": len(history), "history": history,
+            "method": "alternating", "message": f"{rounds} rounds: {slow_used} YAeHMOP + {fast_used} fast evaluations",
+            "slow_evaluations": slow_used, "fast_evaluations": fast_used, "rounds": rounds}
+
+
 def run_global(method, objective, x0, bounds, budget, seed=20261014, polish_method=None,
-               polish_fraction=0.25, polish_starts=4):
-    """Run one global method (optionally followed by a local polish) within ONE total budget."""
+               polish_fraction=0.25, polish_starts=4, objective_many=None, parallel=1, alternating=None):
+    """Run one global method (optionally followed by a local polish) within ONE total budget.
+
+    objective_many (optional): evaluates a list of candidates at once (in parallel);
+    parallel: number of concurrent candidates, also the Bayesian batch size."""
     if method not in GLOBAL_METHODS:
         raise ValueError(f"method must be one of {GLOBAL_METHODS}")
     if polish_method is not None and polish_method not in POLISH_METHODS:
@@ -334,9 +451,22 @@ def run_global(method, objective, x0, bounds, budget, seed=20261014, polish_meth
     def recording(x, eid, stage):
         value, metrics = objective(x, eid, stage)
         return value, {**dict(metrics), "x": [float(v) for v in x]}
+    def recording_many(xs, eids, stage):
+        outs = objective_many(xs, eids, stage)
+        return [(v, {**dict(m), "x": [float(t) for t in x]}) for x, (v, m) in zip(xs, outs)]
     funcs = {"differential-evolution": differential_evolution_minimize, "bayesian": bayesian_minimize,
              "cmaes": cmaes_minimize, "genetic": genetic_minimize, "powell": powell_minimize}
     kw = {} if method == "powell" else {"seed": seed}
+    if method == "alternating":
+        if alternating is None:
+            raise ValueError("optimizer 'alternating' needs the fast-stage settings (fit_sparse_window)")
+        funcs["alternating"] = lambda obj, x, bnd, budget, seed, **k: alternating_minimize(
+            obj, x, bnd, budget, alternating["fast_idx"], alternating["prepare"],
+            alternating.get("fast_budget"), alternating.get("rounds", 3), seed, **k)
+    if objective_many is not None and int(parallel) > 1 and method not in ("powell",):
+        kw["objective_many"] = recording_many
+        if method == "bayesian":
+            kw["batch"] = int(parallel)
     res = funcs[method](recording, x0, bounds, budget=main, **kw)
     history = res["history"]
     best_x, best_loss = res["best_x"], res["best_loss"]

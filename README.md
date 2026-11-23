@@ -41,6 +41,8 @@ python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400 --outdir outpu
 
 The last three physical operations require a YAeHMOP `bind` executable, preferably the [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) fork (`./install.sh --build-yaehmop`), and an atomic parameter table set with YAEHMOP_BIND / YAEHMOP_PARAM_FILE. The example paths are placeholders, not bundled reference bands. **Direct** sees the target in fitting; **frozen evaluation** does not change parameters; **family fitting** excludes a whole held-out target until after the shared fit. These image commands need **gapped, nonmagnetic, spinless** references. Numerical DFT references (`--dft-dir`) also accept spin-polarized runs (`--spin-channel up|down|average`), metals (`objective = metal`), semicore removal (`--semicore auto`) and spin-orbit fits (`soc_fit.py`); see [docs/DFT_REFERENCE.md](docs/DFT_REFERENCE.md). `family_fit.py` accepts every one of these references (DFT folders of any code, gapped and metallic mixed, images, CSV) as members of one shared fit; see [docs/FAMILY_FIT.md](docs/FAMILY_FIT.md). Do not claim Fermi-surface accuracy from a 1D PNG.
 
+**Speed:** `--overlap-radius auto` picks the smallest converged lattice sum per system, the population optimizers evaluate a generation in parallel (`--parallel`), and `--optimizer alternating` alternates YAeHMOP stages with fast numpy stages in which only Hii and K move (cached S(k)); on anatase TiS₂ one evaluation went from 1.1 s to 64 ms (13 ms in the fast stages). See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#optimizers).
+
 ## YAeHMOP solver: the ac-dias/yaehmop fork
 
 > **YAeHMOP solver: use our fork [ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) for fitting.**
@@ -62,7 +64,7 @@ python band_fit_gui.py
 
 A desktop window (Qt) with every command and every command-line option: fit to a **picture of the
 bands + crystal structure**, fit to a **DFT folder** (VASP, QE, SIESTA, FHI-aims, Wannier90; gapped,
-spin-polarized or metallic), spin-orbit, spin combination, transfer, family fits and image tools.
+spin-polarized or metallic), spin-orbit, spin combination, transfer, family fits (with a manifest editor) and image tools.
 Several fits run at the same time with live progress, figures and metrics; at the end a window compares the fit with the original data (for a picture, the EHT bands are drawn over it). Free-text options have drop-down lists of typical values. See
 [docs/GUI.md](docs/GUI.md).
 

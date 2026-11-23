@@ -69,6 +69,15 @@ class FamilyDFT(unittest.TestCase):
             self.assertEqual(train[1]["weight"],2.0)
             self.assertEqual(train[0]["spin_channel"],"average")
             self.assertEqual(set(train[0]["symbols"]),{"C"})
+            m["systems"][0]["objective_settings"]={"segment_weights":"0:3"}
+            (t/"f.yaml").write_text(yaml.safe_dump(m))
+            _,_,tr,_=fm.load_manifest(t/"f.yaml")
+            self.assertEqual(tr[0]["objective_settings"],{"segment_weights":"0:3"})
+            self.assertIsNone(tr[1]["objective_settings"])
+            m["systems"][0]["objective_settings"]={"bogus":1}
+            (t/"f.yaml").write_text(yaml.safe_dump(m))
+            with self.assertRaises(ValueError):fm.load_manifest(t/"f.yaml")
+            m["systems"][0].pop("objective_settings")
             m["systems"][2]["dft_dir"]="a"
             (t/"f.yaml").write_text(yaml.safe_dump(m))
             with self.assertRaisesRegex(ValueError,"also a training folder|identical"):fm.load_manifest(t/"f.yaml")

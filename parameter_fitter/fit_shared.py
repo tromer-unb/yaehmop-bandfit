@@ -171,6 +171,57 @@ def metrics_for_model(system, model):
     }
 
 
+def export_systems(systems, models, native, K, out, param_txt=None):
+    """Standard per-system outputs, as in bands_fit/family_fit: OUTDIR/systems/<name>/ with
+    bands_comparison.png/.csv (traced reference blue, EHT red dashed, every orbital band) and
+    fitting/ (parameters, POSCAR, H(R), S(R), H(k), S(k), fit_summary.json)."""
+    sys.path.insert(0, str(HERE.parent / "USER_WORKFLOW"))
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from bands_fit import write_fitting_dir, path_kpoints, node_positions
+    done = {}
+    for s in systems:
+        model = models[s["name"]]
+        met = metrics_for_model(s, model)
+        sysdir = Path(out) / "systems" / s["name"]
+        sysdir.mkdir(parents=True, exist_ok=True)
+        E = model + met["shift_eV"]
+        x, T = s["xcoord"], s["T"]
+        fig, ax = plt.subplots(figsize=(7.2, 5.0))
+        for j in range(T.shape[1]):
+            ax.plot(x, T[:, j], color="#1f77b4", lw=1.4, label="reference (traced)" if j == 0 else None)
+            ax.plot(x, E[:, j], color="#d62728", lw=1.1, ls="--", label="EHT (shared fit)" if j == 0 else None)
+        nline = int(s["path"].points_per_line)
+        nodes = node_positions(len(s["path"].points), nline)
+        for i, lab in zip(nodes, s["path"].labels):
+            ax.axvline(x[i], color="0.8", lw=.6, zorder=0)
+        ax.set_xticks([x[i] for i in nodes])
+        ax.set_xticklabels(["Γ" if l.upper() in ("G", "GAMMA") else l for l in s["path"].labels])
+        lo, hi = s["fit_window"]
+        ax.axhspan(lo, hi, color="0.95", zorder=-1)
+        ax.set_xlim(0, 1)
+        ax.set_ylabel("Energy (eV)")
+        ax.set_title(f"{s['name']} [{s['role']}] — fit RMSE {met['fit_rmse_eV']:.3f} eV, "
+                     f"gap error {met['gap_error_eV']:+.3f} eV", fontsize=10)
+        ax.legend(frameon=False, fontsize=8, loc="upper right")
+        fig.tight_layout()
+        fig.savefig(sysdir / "bands_comparison.png", dpi=170)
+        plt.close(fig)
+        np.savetxt(sysdir / "bands_comparison.csv", np.column_stack([x, T, E]), delimiter=",",
+                   header="k," + ",".join(f"ref_{j + 1}" for j in range(T.shape[1])) + "," +
+                   ",".join(f"eht_{j + 1}" for j in range(E.shape[1])), comments="")
+        write_fitting_dir(sysdir / "fitting", sysdir, structure=s["cif"], sfmt=s["structure_format"],
+                          native=native, param_txt=param_txt, K=K,
+                          kpoints=path_kpoints(s["path"].points, nline), dim=s["periodic_dim"],
+                          radius=int(max(s["overlap_images"])),
+                          summary=dict(name=s["name"], role=s["role"], mode="fit_shared.py (shared table)",
+                                       K_EHT=float(K), metrics=met, reference_input=str(s["image"])),
+                          node_index=nodes)
+        done[s["name"]] = str(sysdir)
+    return done
+
+
 def average_initial_results(x0, names, paths, base):
     if not paths:
         return np.asarray(x0, float)
@@ -194,6 +245,8 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--validate-only", action="store_true",
                     help="validate YAML schema and exit without reading structures/images")
+    ap.add_argument("--no-export", action="store_true",
+                    help="skip the per-system outputs OUTDIR/systems/<name>/ (figure and fitting/ with H(R), S(R))")
     args = ap.parse_args()
 
     cfg_path, shared, entries = load_config(args.config)
@@ -365,8 +418,10 @@ def main():
     pbest, Kbest = apply_x(defaults, specs, xcur)
 
     final_metrics = {}
+    final_models = {}
     for system in systems:
         model = run_system(system, pbest, Kbest, "final")
+        final_models[system["name"]] = model
         final_metrics[system["name"]] = {
             "role": system["role"], "weight": system["weight"],
             "elements": system["elements"], "fit_window_eV": system["fit_window"],
@@ -387,8 +442,9 @@ def main():
         f"K = {Kbest:.14g}\nWEIGHTED_HIJ = true\n\n" + native.read_text()
     )
 
+    exported = None if args.no_export else export_systems(systems, final_models, native, Kbest, out)
     result = {
-        "tag": args.tag, "config": str(cfg_path),
+        "tag": args.tag, "config": str(cfg_path), "systems_outputs": exported,
         "train_systems": [s["name"] for s in train],
         "test_systems": [s["name"] for s in test],
         "shared_elements": all_elements, "variables": names,

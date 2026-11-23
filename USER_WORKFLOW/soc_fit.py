@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """Fit spin-orbit constants on top of an EHT (YAeHMOP) fit, against DFT bands with SOC.
 
-YAeHMOP has no spin-orbit term; it is added as on-site lambda L.S per element and
-shell (parameter_fitter/soc.py). The EHT parameters of an earlier spinless fit
-stay fixed; only the lambdas are fitted, with the band-window objective (bands
-near the Fermi level, taken in the middle of the gap, weigh more).
+The spin-orbit term is on-site lambda L.S per element and shell (parameter_fitter/soc.py),
+the same model as `bind --soc` of the fork github.com/ac-dias/yaehmop. The EHT
+parameters of an earlier spinless fit stay fixed; only the lambdas are fitted, with
+the band-window objective (bands near the Fermi level, taken in the middle of the
+gap, weigh more).
+
+--engine numpy (default): the spinless H(k), S(k) are computed once by bind and the
+spinor bands of each lambda set by numpy (fast). With a bind that has --soc, the
+final lambdas are then run natively and compared (fit_summary.json "native_soc").
+--engine bind: every evaluation is a native `bind --soc` run (slower; same model).
+yaehmop_soc/ holds soc.dat, the EHT table and an input to repeat the native run.
 
     python USER_WORKFLOW/soc_fit.py --dft-dir path/to/bands-soc --dft-code vasp \\
         --from-fitting outputs/material/fitting --outdir outputs/material_soc
@@ -76,6 +83,9 @@ def main():
     ap.add_argument("--emin", type=float, default=-6.0); ap.add_argument("--emax", type=float, default=6.0)
     ap.add_argument("--name"); ap.add_argument("--outdir", type=Path, required=True)
     ap.add_argument("--fitting-dir", type=Path)
+    ap.add_argument("--engine", choices=("numpy", "bind"), default="numpy",
+                    help="numpy: cached spinless H(k), S(k) + lambda L.S in numpy (default); bind: every evaluation "
+                         "is a native `bind --soc` run (needs github.com/ac-dias/yaehmop)")
     a = ap.parse_args()
 
     outdir = a.outdir.resolve(); outdir.mkdir(parents=True, exist_ok=True)
@@ -115,8 +125,29 @@ def main():
     er = eht_reference(ref, a.points_per_segment, dim)
     kpts = path_kpoints(er.nodes, a.points_per_segment)[er.mask]
     bind, _ = resolve_yaehmop_assets()
+    from yaehmop_generic import bind_features, run_bind_args
+    native_ok = "soc" in bind_features(bind)
+    if a.engine == "bind" and not native_ok:
+        ap.error(f"--engine bind: {bind} has no --soc option (use the bind of github.com/ac-dias/yaehmop)")
     images = overlap_images_for(dim, radius)
     mesh = gamma_mesh(dim, radius)
+    nwork = Path(tempfile.mkdtemp(prefix="socfit_"))
+    write_parameter_file(nwork / "p.parms", params)
+    write_periodic_input_generic(structure, nwork / "soc.bind", None, K, True, nelec, overlap_images=images,
+                                 periodic_dim=dim, structure_format="vasp", kpoints=kpts)
+
+    def write_soc(path, lams):
+        with open(path, "w") as f:
+            f.write("# element shell lambda_eV\n")
+            for (el, sh), v in zip(shells, lams):
+                f.write(f"{el:3s} {sh}  {float(v):.8f}\n")
+
+    def native_bands(lams):
+        """Spinor bands of a native `bind --soc` run on the path (from its 2n x 2n H(k), S(k) dumps)."""
+        write_soc(nwork / "soc.dat", lams)
+        run_bind_args(bind, ["--soc", nwork / "soc.dat"], nwork / "soc.bind", nwork / "p.parms", nwork / "soc.log")
+        H2, S2 = read_matrix_dump(nwork / "soc.bind.HAM"), read_matrix_dump(nwork / "soc.bind.OV")
+        return np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(H2, S2)])
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp); write_parameter_file(tmp / "p.parms", params)
         def dump(ks, tag):
@@ -131,6 +162,8 @@ def main():
     ticks_x = [x for x, _ in er.ticks]
 
     def bands_for(lams):
+        if a.engine == "bind":
+            return native_bands(lams)
         return soc_bands(Hk, Sk, soc_matrix(labels, dict(zip(shells, lams))))
 
     def splittings(B, nocc):
@@ -177,6 +210,27 @@ def main():
     lambdas = dict(zip(shells, [float(v) for v in lam]))
     Hsoc = soc_matrix(labels, lambdas)
     E = soc_bands(Hk, Sk, Hsoc)
+    native = None
+    if native_ok:
+        try:
+            En = native_bands(lam)
+            native = dict(max_difference_eV=float(np.abs(En - E).max()), engine=a.engine,
+                          command="bind --soc soc.dat soc_kpoints.bind parameters_huckel.dat")
+            print(f"NATIVE_SOC bind --soc: spinor bands = numpy model within {native['max_difference_eV']:.1e} eV", flush=True)
+        except Exception as exc:
+            native = dict(error=str(exc))
+        keep = fdir / "yaehmop_soc"; keep.mkdir(exist_ok=True)
+        write_soc(keep / "soc.dat", lam)
+        shutil.copy(nwork / "soc.bind", keep / "soc_kpoints.bind")
+        shutil.copy(table, keep / "parameters_huckel.dat")
+        (keep / "README.txt").write_text(
+            "Native spin-orbit run with the bind of github.com/ac-dias/yaehmop:\n"
+            "  bind --soc soc.dat soc_kpoints.bind parameters_huckel.dat\n"
+            "soc_kpoints.bind: the k points of the DFT path, with Dump Hamil / Dump Overlap (spinor 2n x 2n\n"
+            "H(k), S(k) in soc_kpoints.bind.HAM/.OV). Add 'Average Properties' and a k mesh for the DOS,\n"
+            "Fermi level and spin moments with SOC.\n")
+    else:
+        native = dict(skipped=f"{bind} has no --soc option (github.com/ac-dias/yaehmop)")
     m1 = metrics(lam)
     # Figures (both aligned at their own midgap, as in bands_fit)
     p = 2
@@ -215,6 +269,7 @@ def main():
         f.write("# on-site spin-orbit constants lambda (eV): H_SOC = lambda L.S\n# element shell lambda_eV\n")
         for (el, sh), v in lambdas.items():
             f.write(f"{el:3s} {sh}  {v:.6f}\n")
+    shutil.rmtree(nwork, ignore_errors=True)
     summary = dict(name=name, dft_dir=str(Path(a.dft_dir).resolve()), dft_code=a.dft_code,
                    eht_parameters=str(Path(table).resolve()), K_EHT=K, periodic_dim=dim, overlap_radius=radius,
                    lambdas_eV={f"{el}-{sh}": v for (el, sh), v in lambdas.items()},
@@ -222,7 +277,7 @@ def main():
                    spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down",
                    huckel_SOC_check_max_error_eV=float(max(errs)), n_orbitals_spinless=n,
                    w_split=a.w_split, split_pairs=a.split_pairs,
-                   n_cells=len(kept), objective_settings=wset.to_dict())
+                   n_cells=len(kept), objective_settings=wset.to_dict(), engine=a.engine, native_soc=native)
     summary = portable_paths(json.loads(json.dumps(summary, default=float)), fdir)
     (fdir / "fit_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (fdir / "README.txt").write_text(README)

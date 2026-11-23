@@ -39,7 +39,9 @@ python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini [options]
 | `--from-fit path/to/fit.json` | **Runs solver**: load a saved fit's native parameter file and stored K, verify CIF SHA, regenerate all physical orbitals and plot. |
 | `--from-parameters PATH` | **Runs solver**: compute full original YAeHMOP bands with YOUR table; skips image fitting. |
 | `--k FLOAT` | Wolfsberg–Helmholtz constant, required with `--from-parameters`. |
-| `--overlap-radius INT` | Number of images for **each active lattice direction**, used by **both fitting and recomputation**, allowed 1–8. Default: `[fit] overlap_radius` in the INI, else `5`; `--from-fit` reuses the value stored in `fit.json`. The lattice dimension always follows `[band_path] dimension` (use `3` for bulk crystals). |
+| `--overlap-radius INT\|auto` | Number of images for **each active lattice direction**, used by **both fitting and recomputation**, allowed 1–8. Default: `[fit] overlap_radius` in the INI, else `5`; `--from-fit` reuses the value stored in `fit.json`. The lattice dimension always follows `[band_path] dimension` (use `3` for bulk crystals). `auto`: before the fit, the smallest radius whose bands (start exponents and 20% more diffuse ones, bands up to 8 eV above the highest occupied one) agree with radius `[fit] overlap_radius_max` (default 5) within `[fit] overlap_radius_tol` (default 1e-3 eV); after the fit the fitted table is checked again (warning above 10 × tol). The radius used is in `fit.json` (`overlap_radius_by_system`) and is the one of the exported H(R), S(R). |
+| `--parallel N\|auto` | Candidates evaluated at the same time by the population optimizers (`differential-evolution`, `cmaes`, `genetic`, `bayesian`, `alternating`, and the DE stage of `nelder-mead`). Default `auto` = CPUs / systems (`[fit] parallel`, env `BANDFIT_PARALLEL`). CMA-ES and GA give exactly the sequential result; DE switches to scipy's deferred updating. |
+| `--fast-budget N` | Optimizer `alternating`: evaluations of the fast Hii/K stages (default 10 × budget; `[fit] fast_budget`). `[fit] alternating_rounds` (default 3). |
 
 **Optimizer naming:** `nelder-mead` chooses the original staged YAeHMOP differential-evolution initializer followed by bounded Nelder–Mead. Other options run that stage plus a refinement; the total is split and `--budget` is a requested number of objective calls, not a wall-time limit. Results may vary by system. **Never run fitting during CI**.
 
@@ -72,10 +74,13 @@ Every trial is one physical YAeHMOP calculation; `--budget` is the exact number 
 | `cmaes` | CMA-ES (package `cma`), started at the stock table | Global; needs `cma` |
 | `genetic` | Real-coded GA: tournament, SBX crossover, polynomial mutation, elitism | Global |
 | `powell` | Bounded Powell from the stock table | Local |
+| `alternating` | Rounds of CMA-ES on every parameter (YAeHMOP runs; `--budget` counts these) alternated with CMA-ES on Hii and K only, with the exponents frozen: S(k) is cached and H(k) = F(Hii, K) ∘ S(k) is built and diagonalized in numpy (`--fast-budget` evaluations, default 10 × budget) | Global; needs `cma` |
 
-The global methods (and `powell`) run from the stock parameters with the whole budget and accept `--polish`. They were ported from `dftb_sk_gen`; there they batch evaluations in parallel, here evaluation is sequential. Diamond test (synthetic 3D EHT reference, K=2.0, 1V+1C): with 160 calls `nelder-mead` 0.044 eV, `bayesian` 0.26, `differential-evolution` 0.33, `cmaes` 0.41, `powell` 0.70, `genetic` 0.89 eV; with 1000 calls `nelder-mead` 0.0097, `cmaes` 0.0098, `differential-evolution` 0.025, `genetic` 0.038, `powell` 0.095 eV. A start near the answer favours the local default; wide, unknown landscapes are where the global methods are meant to help.
+The global methods (and `powell`) run from the stock parameters with the whole budget and accept `--polish`. They were ported from `dftb_sk_gen`; as there, the population methods evaluate a generation in parallel (`--parallel`).
 
-`family_fit.py` accepts `--optimizer {nelder-mead,differential-evolution,bayesian,cmaes,genetic,powell}` and `--polish`. `parameter_fitter/fit_sparse_window.py` accepts all of them plus `--polish-fraction`.
+**Speed (2026-11-23).** Anatase TiS₂ (68 orbitals, 181 k points), time per evaluation on 24 threads: radius 5, sequential 1133 ms; `--overlap-radius auto` (→ 3) 314 ms; + parallel population 64 ms; fast Hii/K stage of `alternating` (forked processes) 13 ms. The fast path reproduces YAeHMOP's H(k) exactly (weighted Wolfsberg–Helmholz with the Δ⁴ term, `THE CONST DIAG` = 1.75 on the diagonal of the images of an orbital); at the first use it is checked against `bind` (bands within 2e-3 eV, typically 1e-4) and switched off otherwise (e.g. an original `bind` with K hardwired in THIN mode). Equal-budget tests: SiC (120 YAeHMOP calls) `cmaes` loss 9.28, `alternating` 3.77; anatase TiS₂ (240 calls) 1.71 vs 1.07; at equal wall time on the anatase with radius 3 the two were similar (CMA-ES 1000 calls 0.86, alternating 240 + 1200 fast 0.94): the fast stage pays off most when the lattice sums are expensive. Diamond test (synthetic 3D EHT reference, K=2.0, 1V+1C): with 160 calls `nelder-mead` 0.044 eV, `bayesian` 0.26, `differential-evolution` 0.33, `cmaes` 0.41, `powell` 0.70, `genetic` 0.89 eV; with 1000 calls `nelder-mead` 0.0097, `cmaes` 0.0098, `differential-evolution` 0.025, `genetic` 0.038, `powell` 0.095 eV. A start near the answer favours the local default; wide, unknown landscapes are where the global methods are meant to help.
+
+`family_fit.py` accepts every optimizer above (including `alternating`), `--polish`, `--parallel` and `--fast-budget`. `parameter_fitter/fit_sparse_window.py` accepts all of them plus `--polish-fraction`.
 
 ## Image converter: `USER_WORKFLOW/prepare_band_png.py`
 
@@ -177,10 +182,30 @@ python USER_WORKFLOW/family_fit.py family.yaml --prepare-only --outdir outputs/f
 python USER_WORKFLOW/family_fit.py family.yaml --fit --budget 400   --seed 20261014 --outdir outputs/family
 ~~~
 
-Options: manifest YAML; exactly one of `--validate-only`, `--prepare-only`, `--fit`, `--evaluate FIT_JSON` (score every member with an earlier table, no fit); `--budget`, `--seed`, `--optimizer` (any optimizer of `bands_fit.py`), `--polish`, `--objective frontier|window|metal`, `--basis-add`, `--basis-dz`, `--start-from`, `--workers` (members computed in parallel), `--no-export`, `--outdir`. Members may be DFT folders of any code (`dft_dir`, `dft_code`, and per member or under `defaults:` `metallic auto|true|false`, `spin_channel`, `semicore`, `fermi`, `valence_bands`, `dimension`, `points_per_segment`) or structure + image/CSV + INI, mixed freely; metallic members use the metal objective and gapped DFT members the window objective in the same fit. Test members are optional and read only after the shared vector is frozen. Outputs: `parameters/parameters_huckel.dat`, per-member figures and `fitting/` export in `systems/<name>/`, `family_overview.png`, `family_report.json`. See [family guide](FAMILY_FIT.md).
+Options: manifest YAML; exactly one of `--validate-only`, `--prepare-only`, `--fit`, `--evaluate FIT_JSON` (score every member with an earlier table, no fit); `--budget`, `--seed`, `--optimizer` (any optimizer of `bands_fit.py`, including `alternating`), `--polish`, `--parallel`, `--fast-budget`, `--objective frontier|window|metal`, `--basis-add`, `--basis-dz`, `--start-from`, `--workers` (members computed in parallel), `--no-export`, `--outdir`. Members may be DFT folders of any code (`dft_dir`, `dft_code`, and per member or under `defaults:` `metallic auto|true|false`, `spin_channel`, `semicore`, `fermi`, `valence_bands`, `dimension`, `points_per_segment`) or structure + image/CSV + INI, mixed freely; metallic members use the metal objective and gapped DFT members the window objective in the same fit. Test members are optional and read only after the shared vector is frozen. Outputs: `parameters/parameters_huckel.dat`, per-member figures and `fitting/` export in `systems/<name>/`, `family_overview.png`, `family_report.json`. See [family guide](FAMILY_FIT.md).
 ## Spin–orbit: `USER_WORKFLOW/soc_fit.py`
 
 `--dft-dir DIR --dft-code CODE` (DFT run **with** SOC), `--from-fitting FITTINGDIR` (or `--parameters TABLE --k K`),
 `--outdir`, `--fitting-dir`, `--soc-shells "Mo:d S:p"`, `--w-split 100`, `--split-pairs 3`, `--lambda-max 1.5`,
-`--points-per-segment 15`, `--emin/--emax`, `--dimension`, `--overlap-radius`. Writes `soc_parameters.txt`,
+`--points-per-segment 15`, `--emin/--emax`, `--dimension`, `--overlap-radius`, `--engine numpy|bind`. Writes `soc_parameters.txt`,
 `huckel-SOC.dat`, `basis_set-SOC` (spin up first, then spin down), figures and `fit_summary.json`.
+`--engine numpy` (default) fits the λ on cached spinless H(k), S(k); with the `bind` of
+github.com/ac-dias/yaehmop (`--soc`) the final λ are then run natively (`native_soc` in
+`fit_summary.json`; MoS₂: 5e-9 eV) and `yaehmop_soc/` holds `soc.dat` and an input for
+`bind --soc soc.dat soc_kpoints.bind parameters_huckel.dat`. `--engine bind`: every evaluation is a native run.
+
+## Spin-polarized Hamiltonian: `USER_WORKFLOW/spin_combine.py`
+
+`--up FITTINGDIR --down FITTINGDIR --outdir OUT` joins two channel fits into `huckel-SP.dat` (WanTiBEXOS).
+With the `bind` of the fork (`--parm-up/--parm-down`) the two tables also run together natively
+(`--common-fermi`, Γ-centred mesh `--mesh-radius 4`): per-channel bands checked against `huckel-SP.dat`,
+common Fermi level, electrons per channel and moment (`native_spin` in `fit_summary.json`; input in
+`yaehmop_spin/`); `--no-native` skips it. The native run uses the absolute EHT energies of the two
+separately fitted tables, so its moment can differ from that of `huckel-SP.dat` (both channels aligned
+at the DFT E_F; also reported). bcc Fe: native 1.95, `huckel-SP.dat` 2.26, DFT 2.24 μB.
+
+## Shared prototype: `parameter_fitter/fit_shared.py`
+
+Writes, besides `param_<tag>_native.dat` and `<tag>.json`, `OUTDIR/systems/<name>/` for every system:
+`bands_comparison.png/.csv` (traced reference blue, EHT red dashed) and the standard `fitting/` export
+(parameters, POSCAR, H(R), S(R)); `--no-export` skips it.

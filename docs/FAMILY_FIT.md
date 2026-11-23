@@ -18,10 +18,14 @@ Each member of `systems:` is either
   | `emin`, `emax` | energy range of the full comparison figure |
   | `structure`, `structure_format` | optional; default the structure of the DFT run |
   | `weight` | weight of the member in the shared objective |
+  | `overlap_radius` | radius of this member (1..8 or `auto`; default the global one): 3D phases can use a smaller radius than slabs |
+  | `objective_settings` | window/metal weights of this member only, merged over the global ones, e.g. `segment_weights: "0:3 3:3"` only for slabs whose k path differs from the bulk one |
 
 * or a **structure + band image/CSV + INI** (`structure`, `settings`, `reference`, `mode`, `bbox`, `colors`), as before (gapped, 2/4/6/8 frontier bands).
 
-Global keys: `n_pairs`, `objective` (default: `metal` if a training member is metallic, `window` for DFT, `frontier` for images), `objective_settings` (the `[objective]` keys of the window/metal objectives), `basis_add`, `basis_dz` (double-zeta shells such as `S:p`, see [DFT_REFERENCE.md](DFT_REFERENCE.md); p needs the `bind` of github.com/ac-dias/yaehmop), `start_from` (+ `start_K`), `overlap_radius`, `gap_weight`, `reg_weight`, `overlap_min_eig`, `workers`.
+Global keys: `n_pairs`, `objective` (default: `metal` if a training member is metallic, `window` for DFT, `frontier` for images), `objective_settings` (the `[objective]` keys of the window/metal objectives), `basis_add`, `basis_dz` (double-zeta shells such as `S:p`, see [DFT_REFERENCE.md](DFT_REFERENCE.md); p needs the `bind` of github.com/ac-dias/yaehmop), `start_from` (+ `start_K`), `overlap_radius` (1..8 or `auto`, also per member and in `defaults:`; with `overlap_radius_max`, `overlap_radius_tol`), `gap_weight`, `reg_weight`, `overlap_min_eig`, `workers`, `parallel` (candidates at the same time), `fast_budget` and `alternating_rounds` (optimizer `alternating`).
+
+`basis_dz` together with `start_from` starts the diffuse tail almost equal to the inner function (ζ2 = ζ1 − 0.15, c2/c1 = 0.05), so the first evaluation reproduces the starting table (TiSe₂ slabs: 0.3837 against 0.383).
 
 Example: one table for TiS₂ in seven structures (VASP, PBE, spin-polarized runs with ~0 magnetization, Ti_sv):
 
@@ -46,7 +50,7 @@ python USER_WORKFLOW/family_fit.py family.yaml --fit --optimizer cmaes --polish 
 python USER_WORKFLOW/family_fit.py family.yaml --evaluate out/TiS2/fit/fit.json --outdir out/TiS2_eval
 ~~~
 
-Options: every optimizer of `bands_fit.py` (`--optimizer`, `--polish`, `--budget`, `--seed`), `--objective`, `--basis-add`, `--basis-dz`, `--start-from`, `--workers` (members are computed in parallel), `--no-export`, `--evaluate FIT_JSON` (no fit: score every member with an earlier table).
+Options: every optimizer of `bands_fit.py` (`--optimizer`, including `alternating`, `--polish`, `--budget`, `--seed`), `--objective`, `--basis-add`, `--basis-dz`, `--start-from`, `--workers` (members are computed in parallel), `--parallel` (candidates of a population at the same time; default CPUs / members), `--fast-budget`, `--no-export`, `--evaluate FIT_JSON` (no fit: score every member with an earlier table). The graphical interface has a manifest editor for all of this (Family fit tab, [GUI.md](GUI.md)).
 
 Outputs: `fit/` (fit.json, param_best_native.dat, history), `parameters/parameters_huckel.dat` + `.txt` (the shared table and K), `systems/<name>/` with the comparison figures of every member (DFT blue, EHT red dashed) and, for DFT members, the standard `fitting/` export (H(R), S(R) in WanTiBEXOS format, POSCAR), `heldout/<name>/` for test members, `family_overview.png` (all members in one figure) and `family_report.json` (per-member errors, roles, hashes).
 
