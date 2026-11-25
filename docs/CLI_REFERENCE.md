@@ -210,6 +210,25 @@ the native run then uses the aligned tables (`yaehmop_spin/up.dat`, `down.dat`; 
 with the fitted tables, **2.14 μB aligned** (δ = 0.63 eV, band shape within 0.13 eV of `huckel-SP.dat` near
 E_F), 2.26 in `huckel-SP.dat`, 2.24 in PBE.
 
+## Joint spin fit: `USER_WORKFLOW/spin_joint_fit.py`
+
+Both channels of a spin-polarized **metal** fitted together with one common Fermi level (needs the `bind`
+of the fork: `--parm-up/--parm-down`, `--common-fermi`); method and Fe results in
+[DFT_REFERENCE.md](DFT_REFERENCE.md#joint-fit-of-both-spin-channels-user_workflowspin_joint_fitpy).
+
+| Option | Meaning |
+|---|---|
+| `--dft-dir`, `--dft-code`, `--dft-file`, `--fermi` | spin-polarized DFT band run, as in `bands_fit.py` (`--fermi`: the SCF Fermi level) |
+| `--start-up DIR`, `--start-down DIR` | `fitting/` folders of two channel fits: starting tables, K (mean), objective settings, overlap radius. Without them: the stock table for both channels |
+| `--optimizer`, `--budget`, `--polish`, `--polish-fraction`, `--seed` | `cmaes` (default), `differential-evolution`, `bayesian`, `genetic`, `powell` or `nelder-mead`; default 2000 calls + Nelder-Mead polish |
+| `--sigma0` | initial CMA-ES step in the unit cube: 0.02 from earlier fits (default), 0.25 from the stock table |
+| `--hii-window`, `--zeta-window` | bounds: Hii ± 1.5 eV and exponents ± 25% from earlier fits; ± 5 eV and the stock bounds otherwise |
+| `--mesh-radius`, `--smearing`, `--sigma` | k mesh (2r+1)^dim of the common Fermi level (default 7), occupations `mp1` / `gaussian` / `fermi`, width (0.1 eV) |
+| `--moment`, `--w-moment` | DFT moment (default: VASP `OSZICAR`); weight of \|m_model − m_DFT\| (default 0: reported only) |
+| `--shared-zetas` | the same exponents in both channels |
+| `--parallel` | concurrent candidates (default: half the CPUs) |
+| `--outdir` | `fit/` (fit.json, history, progress, parameter tables), `up/`, `down/` (figures), `fitting/spin_up`, `spin_down`, `spin_polarized` (`huckel-SP.dat`) |
+
 ## Shared prototype: `parameter_fitter/fit_shared.py`
 
 Writes, besides `param_<tag>_native.dat` and `<tag>.json`, `OUTDIR/systems/<name>/` for every system:

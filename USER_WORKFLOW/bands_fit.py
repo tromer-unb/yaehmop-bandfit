@@ -210,7 +210,7 @@ def write_on_original(qa,npz,out_dir,*,title):
     fig.savefig(out,dpi=170);plt.close(fig)
     return out
 
-def write_metal_plots(npz,out_dir,*,title,emin=None,emax=None):
+def write_metal_plots(npz,out_dir,*,title,emin=None,emax=None,align_note=None):
     """Metallic reference: bands relative to E_F (DFT blue, EHT red dashed), two figures:
     bands_comparison (the fitted window) and bands_full_comparison (wider range)."""
     out_dir=Path(out_dir);d=np.load(npz)
@@ -238,7 +238,7 @@ def write_metal_plots(npz,out_dir,*,title,emin=None,emax=None):
         h,l=ax.get_legend_handles_labels();keep=dict(zip(l,h))
         fig.tight_layout(rect=(0,.13,1,1))
         ax.legend(keep.values(),keep.keys(),frameon=False,loc="upper left",bbox_to_anchor=(0,-.10),fontsize=9.5)
-        txt=(f"Metal: bands aligned at E$_F$ (EHT shifted by the optimal constant)\n"
+        txt=(f"Metal: bands aligned at E$_F$ ({align_note or 'EHT shifted by the optimal constant'})\n"
              f"Fit window [{wlo:+.1f}, {whi:+.1f}] eV:  RMSE = {m['rmse']:.3f} eV   MAE = {m['mae']:.3f} eV   "
              f"max |ΔE| = {m['maxabs']:.3f} eV\nwithin ±1 eV of E$_F$: RMSE = {m['near']:.3f} eV")
         fig.text(.985,.015,txt,ha="right",va="bottom",fontsize=9,bbox=dict(boxstyle="round,pad=.45",fc="white",ec="0.6"))

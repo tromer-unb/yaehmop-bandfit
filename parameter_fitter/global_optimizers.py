@@ -436,11 +436,13 @@ def alternating_minimize(objective, x0, bounds, budget, fast_idx, prepare, fast_
 
 
 def run_global(method, objective, x0, bounds, budget, seed=20261014, polish_method=None,
-               polish_fraction=0.25, polish_starts=4, objective_many=None, parallel=1, alternating=None):
+               polish_fraction=0.25, polish_starts=4, objective_many=None, parallel=1, alternating=None,
+               sigma0=None):
     """Run one global method (optionally followed by a local polish) within ONE total budget.
 
     objective_many (optional): evaluates a list of candidates at once (in parallel);
-    parallel: number of concurrent candidates, also the Bayesian batch size."""
+    parallel: number of concurrent candidates, also the Bayesian batch size;
+    sigma0: initial step of CMA-ES in the unit cube (default 0.25; smaller to refine a good start)."""
     if method not in GLOBAL_METHODS:
         raise ValueError(f"method must be one of {GLOBAL_METHODS}")
     if polish_method is not None and polish_method not in POLISH_METHODS:
@@ -457,6 +459,8 @@ def run_global(method, objective, x0, bounds, budget, seed=20261014, polish_meth
     funcs = {"differential-evolution": differential_evolution_minimize, "bayesian": bayesian_minimize,
              "cmaes": cmaes_minimize, "genetic": genetic_minimize, "powell": powell_minimize}
     kw = {} if method == "powell" else {"seed": seed}
+    if method == "cmaes" and sigma0 is not None:
+        kw["sigma0"] = float(sigma0)
     if method == "alternating":
         if alternating is None:
             raise ValueError("optimizer 'alternating' needs the fast-stage settings (fit_sparse_window)")

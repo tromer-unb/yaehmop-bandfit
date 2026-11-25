@@ -206,7 +206,55 @@ also run together (`bind --parm-up --parm-down --common-fermi`): bands of each c
 `yaehmop_spin/`). The separately fitted tables have different energy zeros, so they are aligned first
 (Hii of the up table −δ/2, of the down table +δ/2, until both put the DFT E_F at the same EHT energy;
 `--no-align` skips it). bcc Fe: moment 1.95 μB with the fitted tables, 2.14 μB aligned (band shape within
-0.13 eV), 2.26 in `huckel-SP.dat`, 2.24 in PBE.
+0.13 eV), 2.26 in `huckel-SP.dat`, 2.24 in PBE. The joint fit below removes the alignment step.
+
+## Joint fit of both spin channels (`USER_WORKFLOW/spin_joint_fit.py`)
+
+Separate channel fits align each channel with its own constant, so the absolute EHT energies of the two
+tables differ by an arbitrary amount. `spin_joint_fit.py` fits both tables at once with **one energy zero**,
+using the native spin-polarized `bind` of the fork ([ac-dias/yaehmop](https://github.com/ac-dias/yaehmop),
+`--parm-up/--parm-down`) for every candidate:
+
+1. one `bind` run on the band path gives the EHT bands of both channels;
+2. one `bind` run on a Γ-centred mesh (`--common-fermi`, `--mesh-radius 7` = 15³ in 3D) gives H(k), S(k) of
+   both channels; from their eigenvalues the script gets the **common Fermi level of the model**, with the
+   smearing of the DFT run (`--smearing mp1 --sigma 0.1` = VASP `ISMEAR = 1`, `SIGMA = 0.1`). With
+   smearing, E_F is a smooth function of the parameters; bind's own T = 0 count jumps on a finite mesh
+   (bcc Fe, 9³ → 25³: ±0.05 eV) and is only recorded;
+3. each channel is scored with the `metal` objective against its DFT bands (relative to the DFT E_F), with
+   the shift **fixed** at −E_F(model) instead of a free constant per channel;
+4. optional `--w-moment W`: adds W·|m_model − m_DFT| (the DFT moment is read from the VASP `OSZICAR`, or
+   given with `--moment`).
+
+Parameters: Hii and exponents of each channel (`--shared-zetas`: the same exponents), one K for both.
+Candidates whose S(k) has an eigenvalue below 10⁻³ on the mesh are rejected. Start from two channel fits:
+
+```bash
+python USER_WORKFLOW/spin_joint_fit.py --dft-dir validation/vasp/Fe_bcc_pbe_spin --dft-code vasp \
+    --fermi 5.86385846 --start-up FIT/spin_up --start-down FIT/spin_down \
+    --optimizer cmaes --budget 2000 --polish nelder-mead --outdir out/Fe_joint
+```
+
+From earlier fits the bounds are narrow (Hii ± 1.5 eV, exponents ± 25%, K ± 0.3) and CMA-ES starts with a
+small step (`--sigma0 0.02`): near a good fit the `metal` objective has narrow valleys (its local-extrema
+term jumps when an extremum of an EHT band disappears), and the default step of 0.25 never left the start
+point. Outputs: `fitting/spin_up`, `fitting/spin_down` (H(R) − E_F·S(R) with the *common* E_F),
+`fitting/spin_polarized` (`huckel-SP.dat` via `spin_combine.py --no-align`, with no shift per channel),
+figures in `up/`, `down/`, and `fit/fit.json` (`joint`: E_F, electrons per channel, moment on the fit mesh
+and on a 25³ mesh).
+
+bcc Fe (`validation/vasp/Fe_bcc_pbe_spin/fitting/metal-joint`, from `metal-cmaes-10k`, CMA-ES 2000 + NM,
+13 min with 12 candidates in parallel):
+
+| | separate fits (free constant per channel) | same tables, common E_F | joint fit |
+|---|---|---|---|
+| window RMS up / down (eV) | 0.103 / 0.159 | 0.237 / 0.453 | **0.105 / 0.168** |
+| RMS within 1 eV of E_F up / down (eV) | 0.036 / 0.091 | 0.226 / 0.395 | **0.039 / 0.096** |
+| moment (μB; PBE 2.238) | 1.96 (native, not aligned) | 1.96 | **2.232** (25³ mesh: 2.237) |
+
+The joint tables give the PBE moment with no alignment, at the cost of 0.002–0.01 eV in the band RMS; the
+exchange splitting of the d levels is 2.02 eV (Hii d −16.56 eV up, −14.54 eV down). In the native check of
+`spin_combine.py` both channels have the same energy offset (−14.52687 eV).
 
 ## Metals (`objective = metal`)
 

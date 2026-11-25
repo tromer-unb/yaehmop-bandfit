@@ -68,12 +68,15 @@ def bind_features(bind):
                         if flag in out}
     return _FEATURES[key]
 
-def run_bind_args(bind, args, input_file, param_file=None, log_file=None):
-    """bind with extra options of the fork (e.g. --soc FILE, --parm-up/--parm-down); one BLAS thread."""
+def run_bind_args(bind, args, input_file, param_file=None, log_file=None, cwd=None):
+    """bind with extra options of the fork (e.g. --soc FILE, --parm-up/--parm-down); one BLAS thread.
+    cwd: working directory of the run (thread-safe, unlike os.chdir); relative file names in args
+    are taken from there."""
     env=dict(os.environ)
     for var in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):env.setdefault(var,"1")
     cmd=[str(bind)]+[str(a) for a in args]+[str(input_file)]+([str(param_file)] if param_file else [])
-    proc=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env)
+    proc=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,
+                        cwd=None if cwd is None else str(cwd))
     if log_file is not None: Path(log_file).write_text(proc.stdout)
     if proc.returncode != 0:
         raise RuntimeError(f"YAeHMOP bind failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stdout[-3000:]}")
@@ -258,15 +261,12 @@ def read_matrix_dump(path):
     raw=Path(path).read_bytes()
     nk,n=np.frombuffer(raw[:8],dtype=np.int32)
     data=np.frombuffer(raw[8:8+8*nk*n*n],dtype=np.float64).reshape(nk,n,n)
-    iu=np.triu_indices(n,1)
+    iu=np.triu_indices(n,1);d=np.arange(n)
     out=np.zeros((nk,n,n),complex)
-    for q in range(nk):
-        m=data[q]
-        up=m[iu]-1j*m.T[iu]
-        H=np.diag(np.diag(m)).astype(complex)
-        H[iu]=up
-        H[(iu[1],iu[0])]=np.conj(up)
-        out[q]=H
+    out[:,d,d]=data[:,d,d]
+    up=data[:,iu[0],iu[1]]-1j*data[:,iu[1],iu[0]]     # all k at once (no Python loop: thread friendly)
+    out[:,iu[0],iu[1]]=up
+    out[:,iu[1],iu[0]]=np.conj(up)
     return out
 
 

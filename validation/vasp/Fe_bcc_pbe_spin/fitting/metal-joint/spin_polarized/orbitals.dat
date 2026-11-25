@@ -1,0 +1,10 @@
+# index  atom  orbital  l  m   (YAeHMOP order)
+     1  Fe1      s            0  0
+     2  Fe1      px           1  1
+     3  Fe1      py           1 -1
+     4  Fe1      pz           1  0
+     5  Fe1      dx2-y2       2  2
+     6  Fe1      dz2          2  0
+     7  Fe1      dxy          2 -2
+     8  Fe1      dxz          2  1
+     9  Fe1      dyz          2 -1

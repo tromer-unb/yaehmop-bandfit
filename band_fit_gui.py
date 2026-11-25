@@ -10,6 +10,7 @@ Tabs:
                        Wannier90); gapped, spin-polarized or metallic references
   Spin-orbit           soc_fit.py: lambda L.S on top of a spinless fit
   Spin combine         spin_combine.py: join spin-up and spin-down fits
+  Spin joint fit       spin_joint_fit.py: both spin channels fitted together, common Fermi level
   Frozen transfer      frozen_transfer.py
   Family fit           family_fit.py
   Compare strategies   validation/compare_strategies.py
@@ -41,6 +42,7 @@ TOOLS = {
     "bands_fit": "USER_WORKFLOW/bands_fit.py",
     "soc_fit": "USER_WORKFLOW/soc_fit.py",
     "spin_combine": "USER_WORKFLOW/spin_combine.py",
+    "spin_joint_fit": "USER_WORKFLOW/spin_joint_fit.py",
     "frozen_transfer": "USER_WORKFLOW/frozen_transfer.py",
     "family_fit": "USER_WORKFLOW/family_fit.py",
     "compare_strategies": "validation/compare_strategies.py",
@@ -904,6 +906,8 @@ def run_gui():
             dirs = [d for d in (job.fitting_dir, job.outdir) if d and d.is_dir()]
             if job.tool == "spin_combine" and job.fitting_dir:
                 dirs = [job.fitting_dir.parent / "spin_up", job.fitting_dir.parent / "spin_down"]
+            if job.tool == "spin_joint_fit" and job.outdir:
+                dirs = [job.outdir / "up", job.outdir / "down"]
             tabs = QtWidgets.QTabWidget()
             seen = set()
             family = job.outdir / "family_report.json" if job.outdir else None
@@ -923,7 +927,7 @@ def run_gui():
                             break
                 seen.add("*")
             for d in ([] if "*" in seen else dirs):
-                pref = f"{d.name}: " if job.tool == "spin_combine" else ""
+                pref = f"{d.name}: " if job.tool in ("spin_combine", "spin_joint_fit") else ""
                 for name, title in self.FIGS:
                     f = d / name
                     if f.is_file() and f.name + pref not in seen:
@@ -1606,7 +1610,9 @@ def run_gui():
         intro = ("<b>Fit to a DFT band calculation.</b> Choose the folder of the band run; the package is detected. "
                  "Gapped references use the <i>window</i> objective; metals use <i>metal</i> (bands aligned at "
                  "E<sub>F</sub>; give the Fermi level of the SCF run). Spin-polarized runs: fit each channel, or "
-                 "<i>Fit both spins</i> to fit up and down at the same time and join them (huckel-SP.dat).")
+                 "<i>Fit both spins</i> to fit up and down at the same time and join them (huckel-SP.dat); then "
+                 "<i>Joint spin fit</i> refits both channels together with one common Fermi level (metals, "
+                 "bind of the fork).")
 
         def build_inputs(self):
             g = QtWidgets.QGroupBox("DFT calculation")
@@ -1633,6 +1639,9 @@ def run_gui():
             b = super().buttons()
             b.append(("Fit both spins", self.fit_spins,
                       "fit spin up and spin down in parallel, then join them with spin_combine.py"))
+            b.append(("Joint spin fit", self.fit_spins_joint,
+                      "fit both spin channels together with the common Fermi level of the model (spin_joint_fit.py; "
+                      "metallic reference, bind of the fork); starts from the Fit both spins results when present"))
             return b
 
         def defaults(self):
@@ -1730,6 +1739,34 @@ def run_gui():
             for ch in ("up", "down"):
                 jobs[ch].on_done.append(done)
                 self.win.runs.add(jobs[ch])
+
+        def fit_spins_joint(self):
+            """spin_joint_fit.py on this DFT folder; starts from fitting/spin_up and spin_down when they exist."""
+            try:
+                self.validate()
+                name, out = self.run_dir()
+            except ValueError as exc:
+                self.error(exc)
+                return
+            fdir = Path(self.args.get("fitting_dir") or out / "fitting")
+            cmd = [sys.executable, "-u", self.script("spin_joint_fit"), "--dft-dir", self.f_dir.get(),
+                   "--dft-code", self.ini.get("reference", "dft_code"), "--name", name,
+                   "--outdir", str(out / "joint")]
+            for key, opt in (("fermi", "--fermi"),):
+                v = self.ini.get("reference", key)
+                if v:
+                    cmd += [opt, str(v)]
+            for key, opt in (("optimizer", "--optimizer"), ("budget", "--budget"), ("polish", "--polish")):
+                v = self.ini.get("fit", key)
+                if v:
+                    cmd += [opt, str(v)]
+            if self.f_struct.get():
+                cmd += ["--structure", self.f_struct.get()]
+            for ch in ("up", "down"):
+                if (fdir / f"spin_{ch}" / "parameters_huckel.dat").is_file():
+                    cmd += [f"--start-{ch}", str(fdir / f"spin_{ch}")]
+            self.win.runs.add(Job(f"{name} joint spin", "spin_joint_fit", cmd, outdir=out / "joint",
+                                  fitting_dir=out / "joint" / "fitting" / "spin_polarized"))
 
     # ------------------------------------------------------------- family_fit tab
     class FamilyTab(ToolTab):
@@ -2113,6 +2150,15 @@ def run_gui():
             self.tabs.addTab(GenericTab(self, "spin_combine",
                                         "<b>Spin-polarized Hamiltonian.</b> Join the fitting/ folders of a spin-up and "
                                         "a spin-down fit into huckel-SP.dat (WanTiBEXOS)."), "Spin combine")
+            self.tabs.addTab(GenericTab(self, "spin_joint_fit",
+                                        "<b>Joint spin fit.</b> Both spin channels of a spin-polarized metal fitted "
+                                        "together with the native spin-polarized bind of the fork (--parm-up / "
+                                        "--parm-down): one common Fermi level, so the exchange splitting and the "
+                                        "moment come from the model. Start from two channel fits (--start-up, "
+                                        "--start-down).",
+                                        primary=["dft_dir", "dft_code", "fermi", "start_up", "start_down", "outdir",
+                                                 "optimizer", "budget", "polish", "w_moment", "mesh_radius"]),
+                             "Spin joint fit")
             self.tabs.addTab(GenericTab(self, "frozen_transfer",
                                         "<b>Frozen transfer.</b> Apply fitted parameters to another structure "
                                         "without refitting (evaluation only)."), "Frozen transfer")

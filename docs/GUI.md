@@ -27,9 +27,10 @@ otherwise run `pip install PySide6-Essentials`.
 | Task | Command | What you give |
 |---|---|---|
 | Fit to image | `bands_fit.py` | crystal structure (CIF, POSCAR, QE, SIESTA, FHI-aims) + picture (PNG/JPEG/TIFF/WebP) or CSV of the bands, energy range, k path (or a *standard path*: 2D hexagonal/square/rectangular, 3D fcc/bcc/simple cubic/hexagonal, 1D). *Preview* = `--prepare-only` (shows `extraction_preview.png`). At the end the fitted EHT bands are drawn over the original picture (`bands_on_original.png`). |
-| Fit to DFT | `bands_fit.py --dft-dir` | folder of the band calculation (package detected: VASP, QE, SIESTA, FHI-aims, Wannier90). *Preview* shows the DFT bands; a metal triggers the offer of `objective = metal`. *Fit both spins* fits spin up and down in parallel and runs `spin_combine.py`. |
+| Fit to DFT | `bands_fit.py --dft-dir` | folder of the band calculation (package detected: VASP, QE, SIESTA, FHI-aims, Wannier90). *Preview* shows the DFT bands; a metal triggers the offer of `objective = metal`. *Fit both spins* fits spin up and down in parallel and runs `spin_combine.py`; *Joint spin fit* then refits both channels together with one common Fermi level (`spin_joint_fit.py`, starting from the *Fit both spins* results). |
 | Spin-orbit | `soc_fit.py` | DFT run with SOC + `fitting/` folder of a spinless fit |
 | Spin combine | `spin_combine.py` | `fitting/` folders of the spin-up and spin-down fits |
+| Spin joint fit | `spin_joint_fit.py` | DFT folder of a spin-polarized metal + `fitting/` folders of two channel fits (`--start-up`, `--start-down`); both channels fitted together with the native spin-polarized `bind` of the fork and one common Fermi level |
 | Frozen transfer | `frozen_transfer.py` | fitted parameters + another structure |
 | Family fit | `family_fit.py` | manifest editor: members (DFT folders, added several at a time with the package detected, or structure + INI + picture), role train/test, weight, spin channel, metallic, semicore, overlap radius and objective weights per member; shared settings and `defaults:`; mode *Fit*, *Validate only*, *Prepare only* or *Evaluate an earlier fit* (`--evaluate fit.json`); *Load…*, *Save*, *Show YAML* |
 | Compare strategies | `validation/compare_strategies.py` | protocols on the validation examples |

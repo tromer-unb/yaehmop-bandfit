@@ -265,7 +265,7 @@ def window_error(ref, n_ref, eht, n_eht, x, nodes_x, s: WindowSettings):
                 **{f"term_{k}": float(v) for k, v in terms.items()})
 
 
-def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
+def metal_error(ref, eht, x, nodes_x, s: WindowSettings, shift=None):
     """Objective 'metal': no gap, so no VBM/CBM alignment.
 
     ref (nk, nb_dft): DFT energies relative to the Fermi level; eht (nk, norb): absolute
@@ -277,6 +277,9 @@ def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
     Terms: weighted RMS, frontier (sharper decay, frontier_scale), high-symmetry points,
     local extrema (energy and position), named bands b1, b2... via band_weights
     ('v1:5' = lowest band; for metals v<j> counts from the bottom) and slope.
+
+    shift: a fixed c instead of the fitted one, e.g. c = -E_F(model) when the model has
+    its own Fermi level (joint fit of two spin channels with a common Fermi level).
     """
     nb = min(ref.shape[1], eht.shape[1])
     A = np.asarray(ref[:, :nb], float)
@@ -286,7 +289,7 @@ def metal_error(ref, eht, x, nodes_x, s: WindowSettings):
         raise ValueError("no DFT band inside the metal window")
     G = (s.far_weight + (1 - s.far_weight) * np.exp(-np.abs(A) / max(s.energy_scale, 1e-6))) * inside
     G = G * _segment_factor(x, nodes_x, s.segment_weights)[:, None]
-    c = float(np.sum(G * (A - B0)) / np.sum(G))
+    c = float(np.sum(G * (A - B0)) / np.sum(G)) if shift is None else float(shift)
     B = B0 + c
     D = B - A
 

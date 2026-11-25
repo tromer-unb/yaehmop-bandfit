@@ -1090,9 +1090,45 @@ absolute EHT energies differ by an arbitrary constant and a common-Fermi run wit
 search on \cmd{bind} runs) until both put the DFT $E_F$ at the same EHT energy (\cmd{--no-align} keeps the fitted tables). A uniform
 $H_{ii}$ shift is not an exact rigid shift in EHT ($K$ and \cmd{THE CONST DIAG} weigh it), so the band shape changes a little
 (reported). For Fe: moment 1.95~$\mu_B$ with the fitted tables, 2.14~$\mu_B$ aligned ($\delta=0.63$~eV, band shape within 0.13~eV
-near $E_F$), 2.26~$\mu_B$ in \cmd{huckel-SP.dat} (same mesh) and 2.24 in PBE. A joint fit of the two channels with a common energy
-zero would remove the remaining difference. States more than 15~eV above
+near $E_F$), 2.26~$\mu_B$ in \cmd{huckel-SP.dat} (same mesh) and 2.24 in PBE. The joint fit below removes the remaining
+difference. States more than 15~eV above
 $E_F$ come from the near-null directions of $S(k)$ (smallest eigenvalue $\sim10^{-3}$) and are not physical.
+
+\paragraph{Joint fit of both channels (\cmd{spin\_joint\_fit.py}).} Fitted separately, each channel is aligned with its
+own constant, so the absolute EHT energies of the two tables are unrelated. \cmd{USER\_WORKFLOW/spin\_joint\_fit.py} fits both
+tables at once with \emph{one} energy zero, running every candidate with the native spin-polarized \cmd{bind} of the fork:
+\begin{enumerate}[nosep]
+\item \cmd{bind --parm-up up.dat --parm-down down.dat} on the band path: the EHT bands of both channels;
+\item the same with \cmd{--common-fermi} on a $\Gamma$-centred mesh (\cmd{--mesh-radius 7}, $15^3$): $H(\mathbf k)$, $S(\mathbf k)$ of
+  both channels, whose eigenvalues give the common Fermi level of the model,
+  $\sum_{\sigma,n,\mathbf k} f\big((\varepsilon_{n\mathbf k\sigma}-E_F)/\sigma_s\big)/N_k = N_e$, with the smearing of the DFT run
+  (Methfessel--Paxton order 1, $\sigma_s=0.1$~eV, as VASP \cmd{ISMEAR = 1}). With smearing $E_F$ is a smooth function of the
+  parameters; the $T=0$ count of \cmd{bind} jumps on a finite mesh and is only recorded;
+\item each channel is scored with the \cmd{metal} objective against its DFT bands, with the shift \emph{fixed} at $-E_F$ instead of a
+  free constant per channel; the cost is the mean of the two channels, plus optionally $w_m|m-m_{\rm DFT}|$ (\cmd{--w-moment}).
+\end{enumerate}
+The parameters are the $H_{ii}$ and exponents of each channel (\cmd{--shared-zetas}: common exponents) and one $K$. Started from
+two channel fits (\cmd{--start-up}, \cmd{--start-down}), the bounds are narrow ($H_{ii}\pm1.5$~eV, exponents $\pm25\%$) and CMA-ES
+starts with a small step (\cmd{--sigma0 0.02}): near a good fit the \cmd{metal} objective has narrow valleys, because its
+local-extrema term jumps when an extremum of an EHT band disappears, and the default step of 0.25 never left the start point. The
+outputs are the standard \cmd{fitting/spin\_up}, \cmd{spin\_down} (energy zero: the common $E_F$) and \cmd{spin\_polarized}
+(\cmd{huckel-SP.dat} with no shift per channel). For bcc Fe (\cmd{fitting/metal-joint}, from \cmd{metal-cmaes-10k}, CMA-ES 2000 + NM,
+13~min):
+\begin{center}\footnotesize\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l c c c}
+\toprule
+ & separate fits & same tables, common $E_F$ & joint fit \\
+\midrule
+RMS window up / down (eV) & 0.103 / 0.159 & 0.237 / 0.453 & 0.105 / 0.168 \\
+RMS $\pm1$~eV of $E_F$ up / down (eV) & 0.036 / 0.091 & 0.226 / 0.395 & 0.039 / 0.096 \\
+moment ($\mu_B$; PBE 2.238) & 1.96 (native) & 1.96 & 2.232 ($25^3$: 2.237) \\
+\bottomrule
+\end{tabular}\end{center}
+The joint tables give the PBE moment with no alignment, for 0.002--0.01~eV more band RMS; the exchange splitting of the $d$ levels is
+2.02~eV ($H_{dd}$ $-16.56$~eV up, $-14.54$~eV down), and in the native check of \cmd{spin\_combine.py} both channels have the same
+energy offset.
+
+\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_up.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit, spin up: bands relative to the common $E_F$ of the model (\cmd{fitting/metal-joint/spin\_up}).\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_down.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit, spin down (\cmd{fitting/metal-joint/spin\_down}); moment of the model 2.23~$\mu_B$.\par}\end{minipage}\par\medskip
 
 % ================================================================ 6e
 \section{Validation: best fits}\label{sec:validation}
