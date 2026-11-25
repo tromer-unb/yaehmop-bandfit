@@ -2,41 +2,41 @@
   "spin_up_fit": "../spin_up",
   "spin_down_fit": "../spin_down",
   "n_orbitals_per_spin": 9,
-  "n_cells": 927,
+  "n_cells": 909,
   "shift_up_eV": 0.0,
   "shift_down_eV": 0.0,
-  "K_EHT_up": 1.754076388473895,
-  "K_EHT_down": 1.754076388473895,
+  "K_EHT_up": 1.7606171304781926,
+  "K_EHT_down": 1.7606171304781926,
   "energy_zero": "DFT Fermi level; each channel shifted by (DFT midgap of the channel - E_F); 0 for a metal (already at E_F)",
   "spinor_basis": "2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero",
   "native_spin": {
     "k_mesh": "Gamma-centred 9^3",
     "huckel_SP_electrons_below_EF": {
-      "up": 5.165980795610425,
+      "up": 5.160493827160494,
       "down": 2.93278463648834,
-      "moment": 2.233196159122085
+      "moment": 2.2277091906721536
     },
     "fitted_tables": {
-      "command": "bind --parm-up up.dat --parm-down down.dat --const-up 1.75407638847 --const-down 1.75407638847 --common-fermi spin.bind",
-      "common_fermi_eV": -14.588591,
+      "command": "bind --parm-up up.dat --parm-down down.dat --const-up 1.76061713048 --const-down 1.76061713048 --common-fermi spin.bind",
+      "common_fermi_eV": -14.564227,
       "electrons_up": 5.067215,
       "electrons_down": 2.932785,
       "magnetic_moment_per_cell": 2.134431,
       "bands_vs_huckel_SP": {
         "up": {
-          "energy_offset_eV": -14.526873769934266,
-          "max_deviation_within_3eV_eV": 7.04424204354126e-05,
-          "max_deviation_up_to_15eV_eV": 0.0005065346903307955
+          "energy_offset_eV": -14.513721060058382,
+          "max_deviation_within_3eV_eV": 7.177083281284524e-05,
+          "max_deviation_up_to_15eV_eV": 0.0004634347674059569
         },
         "down": {
-          "energy_offset_eV": -14.526874150884613,
-          "max_deviation_within_3eV_eV": 9.125142254440277e-05,
-          "max_deviation_up_to_15eV_eV": 0.0003681045297732055
+          "energy_offset_eV": -14.513721431936734,
+          "max_deviation_within_3eV_eV": 9.198758887762892e-05,
+          "max_deviation_up_to_15eV_eV": 0.00034870310169310414
         }
       },
       "common_fermi_in_huckel_SP_frame_eV": {
-        "up": -0.061717230065733375,
-        "down": -0.06171684911538655
+        "up": -0.050505939941619005,
+        "down": -0.05050556806326689
       }
     },
     "note": "energy_offset_eV: native EHT energy minus huckel-SP.dat energy (per channel, states within 3 eV of E_F); fitted_tables: the two tables as fitted, whose absolute energies differ by an arbitrary constant (common Fermi level not physical); aligned_tables: Hii of each channel shifted (delta_Hii_up_eV, delta_Hii_down_eV) so both channels put the DFT Fermi level at the same EHT energy (yaehmop_spin/up.dat, down.dat); max_deviation_*: change of band shape against huckel-SP.dat"

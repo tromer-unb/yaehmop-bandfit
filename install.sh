@@ -9,7 +9,7 @@
 #   --build-yaehmop         download and compile YAeHMOP into the environment (bind + eht_parms.dat),
 #                           from the fork github.com/ac-dias/yaehmop (double-zeta p, spin, SOC)
 #   --yaehmop-repo URL      git repository for --build-yaehmop (default: the ac-dias/yaehmop fork)
-#   --yaehmop-ref REF       git commit/tag for --build-yaehmop (default: 9d6d15f, the tested one)
+#   --yaehmop-ref REF       git commit/tag for --build-yaehmop (default: d7e3deb, the tested one)
 #   --tests                 run the test suite at the end
 #   -h, --help              this help
 #
@@ -22,9 +22,10 @@ ENV_NAME="yaehmop-bandfit"
 BIND="" PARAMS=""
 BUILD_YAEHMOP=0
 # Fork of YAeHMOP with double-zeta p orbitals (needed by basis_dz = X:p), spin polarization and
-# SOC; with single-zeta tables it gives the same bands as the original program.
+# SOC (also SOC on two spin tables, with charge iteration); with single-zeta tables it gives the
+# same bands as the original program. spin_joint_fit.py needs its --parm-up/--common-fermi.
 YAEHMOP_REPO="https://github.com/ac-dias/yaehmop.git"
-YAEHMOP_REF="9d6d15f536003299a5bf538c9bf60bc049508347"
+YAEHMOP_REF="d7e3debf8125a37336d1fd41f0d25eb32f9d04ec"
 YAEHMOP_SRC="$HERE/third_party/yaehmop"
 RUN_TESTS=0
 
@@ -141,6 +142,14 @@ if [ -n "$BIND" ] && [ -n "$PARAMS" ]; then
     echo "  double-zeta p supported (basis_dz = X:p available)"
   else
     echo "  note: this bind has no double-zeta p; basis_dz = X:p will be refused (use --build-yaehmop)"
+  fi
+  # native spin polarization / SOC of the fork (spin_combine.py, soc_fit.py, spin_joint_fit.py)
+  HELP="$("$BIND" --help 2>&1 || true)"
+  if printf '%s' "$HELP" | grep -q -- "--parm-up" && printf '%s' "$HELP" | grep -q -- "--common-fermi" \
+     && printf '%s' "$HELP" | grep -q -- "--soc"; then
+    echo "  native spin polarization and SOC supported (--parm-up/--parm-down, --common-fermi, --soc)"
+  else
+    echo "  note: this bind has no native spin/SOC; spin_joint_fit.py needs it (use --build-yaehmop)"
   fi
   [ -s "$T/h2.bind.out" ] && rm -rf "$T"
 else

@@ -243,18 +243,33 @@ point. Outputs: `fitting/spin_up`, `fitting/spin_down` (H(R) − E_F·S(R) with 
 figures in `up/`, `down/`, and `fit/fit.json` (`joint`: E_F, electrons per channel, moment on the fit mesh
 and on a 25³ mesh).
 
-bcc Fe (`validation/vasp/Fe_bcc_pbe_spin/fitting/metal-joint`, from `metal-cmaes-10k`, CMA-ES 2000 + NM,
-13 min with 12 candidates in parallel):
+bcc Fe (`validation/vasp/Fe_bcc_pbe_spin/fitting/metal-joint`), in two stages of CMA-ES + NM with 12 or 6
+candidates in parallel: (1) from `metal-cmaes-10k`, 2000 calls, 13 min (`joint_fit_stage1.json`); (2) from stage 1
+with more weight on the lowest band, `--objective band_weights=v1:5 --objective w_bands=2`, 1500 calls, 6 min
+(`joint_fit.json`):
 
-| | separate fits (free constant per channel) | same tables, common E_F | joint fit |
-|---|---|---|---|
-| window RMS up / down (eV) | 0.103 / 0.159 | 0.237 / 0.453 | **0.105 / 0.168** |
-| RMS within 1 eV of E_F up / down (eV) | 0.036 / 0.091 | 0.226 / 0.395 | **0.039 / 0.096** |
-| moment (μB; PBE 2.238) | 1.96 (native, not aligned) | 1.96 | **2.232** (25³ mesh: 2.237) |
+| | separate fits (free constant per channel) | same tables, common E_F | joint, stage 1 | **joint, stage 2** |
+|---|---|---|---|---|
+| window RMS up / down (eV) | 0.103 / 0.159 | 0.237 / 0.453 | 0.105 / 0.168 | **0.076 / 0.148** |
+| RMS within 1 eV of E_F up / down (eV) | 0.036 / 0.091 | 0.226 / 0.395 | 0.039 / 0.096 | **0.045 / 0.094** |
+| lowest (s) band RMS up / down (eV) | | | 0.21 / 0.22 | **0.10 / 0.10** |
+| moment (μB; PBE 2.238) | 1.96 (native, not aligned) | 1.96 | 2.232 | **2.210** (25³ mesh: 2.219) |
 
-The joint tables give the PBE moment with no alignment, at the cost of 0.002–0.01 eV in the band RMS; the
-exchange splitting of the d levels is 2.02 eV (Hii d −16.56 eV up, −14.54 eV down). In the native check of
-`spin_combine.py` both channels have the same energy offset (−14.52687 eV).
+The joint tables give the PBE moment within 1% with no alignment. In the native check of `spin_combine.py`
+both channels have the same energy offset.
+
+**The remaining errors of Fe.**
+- *Bottom of the s band* (stage 1: −0.53 eV near Γ, a "W" with a local maximum at Γ where PBE has a parabola):
+  the lowest band is 4s with a negative Mulliken 4p weight (−0.25 halfway Γ–H): the s–p overlap is large and the
+  s–p coupling, zero at Γ by symmetry, pushes the band down just off Γ more than the s–s dispersion raises it. The
+  `metal` weight g(E) is only ≈ 0.15 at −8 eV, so the fit did not see it; weighting the band (stage 2) halves the
+  error at the cost of +0.006 eV within 1 eV of E_F (up) and 0.02 μB of moment.
+- *Unoccupied d bands of the down channel* (+1.5 … +3 eV; bands 4–6: 0.13, 0.21, 0.25 eV RMS, against 0.04–0.06
+  for the d bands of the up channel): the e_g–t_2g splitting at Γ is 1.55 eV in EHT against 1.94 in PBE (the up
+  channel reproduces its own). Neither more weight on these bands (`--objective-down "band_weights=v4:3 v5:3 v6:3"`)
+  nor one K per channel (`--k-per-channel`) changes them (bands 4–6 within 0.01 eV): one double-zeta d shell
+  per channel in the EHT form cannot give the crystal-field splitting of both channels, so a better fit needs a
+  different basis, not other weights.
 
 ## Metals (`objective = metal`)
 

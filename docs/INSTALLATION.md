@@ -7,7 +7,7 @@
 conda activate yaehmop-bandfit
 ```
 
-`install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, compiles YAeHMOP from the fork [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (commit 9d6d15f by default; `--yaehmop-repo`, `--yaehmop-ref` choose another), stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation plus a check of double-zeta p support.
+`install.sh` creates or updates the `yaehmop-bandfit` environment from `environment.yml`, compiles YAeHMOP from the fork [github.com/ac-dias/yaehmop](https://github.com/ac-dias/yaehmop) (commit d7e3deb by default; `--yaehmop-repo`, `--yaehmop-ref` choose another), stores `YAEHMOP_BIND` and `YAEHMOP_PARAM_FILE` in it and runs one real YAeHMOP test calculation plus a check of double-zeta p support and of the native spin polarization and SOC of the fork (needed by `spin_joint_fit.py`).
 
 **Why the fork.** It is the original program plus double-zeta p orbitals (needed by `basis_dz = X:p`), spin-polarized runs with one table per channel, spin-orbit coupling, a configurable K of the diagonal term and a few fixes. With single-zeta tables it gives exactly the bands of the original program (checked to |ΔE| = 0), so earlier fits are unchanged. The original program also works for everything except `basis_dz` on s/p shells, which it would silently ignore; band-fit detects this and stops. Use `--yaehmop-bind PATH --yaehmop-params PATH` for an existing YAeHMOP instead of `--build-yaehmop`, `--env NAME` for another name and `--help` for all options.
 

@@ -346,8 +346,13 @@ def _local(objective, x0, bounds, budget, method, prefix, stage):
     return b.result("nelder-mead", _run(b, body))
 
 
-def polish(objective, history, bounds, budget, method="nelder-mead", n_starts=4, prefix=0):
-    """Local refinement from the best DISTINCT points of a finished search (budget split evenly)."""
+def polish(objective, history, bounds, budget, method="nelder-mead", n_starts=4, prefix=0, parallel=1):
+    """Local refinement from the best DISTINCT points of a finished search (budget split evenly).
+
+    parallel > 1: the local searches of the different starting points run at the same time, one
+    thread each (the objective must be thread-safe, as the fitters' are: each call writes its own
+    files). Each start keeps its share of the budget and its evaluation numbers, and the history is
+    returned in the same order, so for a deterministic objective the result equals the sequential one."""
     if method not in POLISH_METHODS:
         raise ValueError("polish must be 'nelder-mead' or 'powell'")
     seeds = []
@@ -360,17 +365,25 @@ def polish(objective, history, bounds, budget, method="nelder-mead", n_starts=4,
         if len(seeds) >= n_starts:
             break
     seeds = seeds[:max(1, min(len(seeds), budget))]
+    shares = [budget // len(seeds) + (1 if k < budget % len(seeds) else 0) for k in range(len(seeds))]
+    jobs = [(k, x, share, prefix + sum(shares[:k])) for k, (x, share) in enumerate(zip(seeds, shares)) if share >= 1]
+
+    def run(job):
+        k, x, share, pre = job
+        return _local(objective, x, bounds, share, method, pre, f"polish-{method}-{k + 1}")
+    if int(parallel) > 1 and len(jobs) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(min(int(parallel), len(jobs))) as pool:
+            results = list(pool.map(run, jobs))
+    else:
+        results = [run(j) for j in jobs]
     out_hist, best = [], [float("inf"), None]
-    for k, x in enumerate(seeds):
-        share = budget // len(seeds) + (1 if k < budget % len(seeds) else 0)
-        if share < 1:
-            continue
-        r = _local(objective, x, bounds, share, method, prefix + len(out_hist), f"polish-{method}-{k + 1}")
+    for r in results:
         out_hist += r["history"]
         if r["best_x"] is not None and r["best_loss"] < best[0]:
             best = [r["best_loss"], r["best_x"]]
     return {"best_x": best[1], "best_loss": best[0], "evaluations": len(out_hist),
-            "history": out_hist, "starts": len(seeds)}
+            "history": out_hist, "starts": len(seeds), "parallel": min(int(parallel), max(1, len(jobs)))}
 
 
 def alternating_minimize(objective, x0, bounds, budget, fast_idx, prepare, fast_budget=None,
@@ -475,11 +488,13 @@ def run_global(method, objective, x0, bounds, budget, seed=20261014, polish_meth
     history = res["history"]
     best_x, best_loss = res["best_x"], res["best_loss"]
     if pol:
-        p = polish(recording, history, bounds, pol, polish_method, polish_starts, prefix=len(history))
+        p = polish(recording, history, bounds, pol, polish_method, polish_starts, prefix=len(history),
+                   parallel=parallel)
         history = history + p["history"]
         if p["best_x"] is not None and p["best_loss"] < best_loss:
             best_x, best_loss = p["best_x"], p["best_loss"]
-        res["polish"] = {"method": polish_method, "evaluations": p["evaluations"], "starts": p["starts"]}
+        res["polish"] = {"method": polish_method, "evaluations": p["evaluations"], "starts": p["starts"],
+                         "parallel": p["parallel"]}
     for row in history:
         row.pop("x", None)
     res.update(best_x=best_x, best_loss=best_loss, evaluations=len(history), history=history,

@@ -199,7 +199,7 @@ and \cmd{cma} (optimizer \cmd{cmaes}).
 \subsection{YAeHMOP}
 
 The solver and its atomic parameter table are \textbf{not bundled}. \cmd{./install.sh --build-yaehmop}
-compiles the fork \url{https://github.com/ac-dias/yaehmop} (commit 9d6d15f by default;
+compiles the fork \url{https://github.com/ac-dias/yaehmop} (commit d7e3deb by default;
 \cmd{--yaehmop-repo}, \cmd{--yaehmop-ref} choose another). The fork is the original program plus
 double-zeta $p$ orbitals (needed by \cmd{--basis-dz X:p}), spin-polarized runs, spin--orbit coupling and a
 few fixes; with single-zeta tables it gives exactly the bands of the original program, so earlier fits
@@ -744,7 +744,10 @@ alternating & rounds of CMA-ES on all parameters (YAeHMOP calls, counted by \cmd
 
 The global methods run from the stock parameters with the whole budget and accept
 \cmd{--polish nelder-mead} or \cmd{--polish powell}: a local refinement from the best distinct points
-found, using 25\% of the same budget. They were ported from \cmd{dftb\_sk\_gen}. The Bayesian optimizer refits the Gaussian process
+found (up to 4), using 25\% of the same budget split evenly among them. The local searches of the different starting points run
+at the same time, one thread each (with \cmd{--parallel} $>1$): each keeps its share of the budget and its evaluation numbers, so
+the result is the one of the sequential polish (checked to the last digit), in about a quarter of the time (bcc Fe joint spin fit,
+120 polish calls: 74~s $\to$ 22~s). They were ported from \cmd{dftb\_sk\_gen}. The Bayesian optimizer refits the Gaussian process
 at every step and becomes slow above a few hundred calls; it pays off when calls are expensive.
 
 \paragraph{Parallel populations.} The population methods (DE, CMA-ES, GA, the Bayesian batch, \cmd{alternating}
@@ -1112,23 +1115,36 @@ two channel fits (\cmd{--start-up}, \cmd{--start-down}), the bounds are narrow (
 starts with a small step (\cmd{--sigma0 0.02}): near a good fit the \cmd{metal} objective has narrow valleys, because its
 local-extrema term jumps when an extremum of an EHT band disappears, and the default step of 0.25 never left the start point. The
 outputs are the standard \cmd{fitting/spin\_up}, \cmd{spin\_down} (energy zero: the common $E_F$) and \cmd{spin\_polarized}
-(\cmd{huckel-SP.dat} with no shift per channel). For bcc Fe (\cmd{fitting/metal-joint}, from \cmd{metal-cmaes-10k}, CMA-ES 2000 + NM,
-13~min):
-\begin{center}\footnotesize\setlength{\tabcolsep}{5pt}
-\begin{tabular}{l c c c}
+(\cmd{huckel-SP.dat} with no shift per channel). For bcc Fe (\cmd{fitting/metal-joint}) the fit ran in two stages of CMA-ES + NM:
+(1) from \cmd{metal-cmaes-10k}, 2000 calls, 13~min; (2) from (1) with more weight on the lowest band
+(\cmd{--objective band\_weights=v1:5 --objective w\_bands=2}), 1500 calls, 6~min:
+\begin{center}\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c c c c}
 \toprule
- & separate fits & same tables, common $E_F$ & joint fit \\
+ & separate fits & same tables, common $E_F$ & joint (1) & joint (2) \\
 \midrule
-RMS window up / down (eV) & 0.103 / 0.159 & 0.237 / 0.453 & 0.105 / 0.168 \\
-RMS $\pm1$~eV of $E_F$ up / down (eV) & 0.036 / 0.091 & 0.226 / 0.395 & 0.039 / 0.096 \\
-moment ($\mu_B$; PBE 2.238) & 1.96 (native) & 1.96 & 2.232 ($25^3$: 2.237) \\
+RMS window up / down (eV) & 0.103 / 0.159 & 0.237 / 0.453 & 0.105 / 0.168 & 0.076 / 0.148 \\
+RMS $\pm1$~eV of $E_F$ up / down (eV) & 0.036 / 0.091 & 0.226 / 0.395 & 0.039 / 0.096 & 0.045 / 0.094 \\
+lowest ($s$) band up / down (eV) & & & 0.21 / 0.22 & 0.10 / 0.10 \\
+moment ($\mu_B$; PBE 2.238) & 1.96 (native) & 1.96 & 2.232 & 2.210 ($25^3$: 2.219) \\
 \bottomrule
 \end{tabular}\end{center}
-The joint tables give the PBE moment with no alignment, for 0.002--0.01~eV more band RMS; the exchange splitting of the $d$ levels is
-2.02~eV ($H_{dd}$ $-16.56$~eV up, $-14.54$~eV down), and in the native check of \cmd{spin\_combine.py} both channels have the same
-energy offset.
+The joint tables give the PBE moment within 1\% with no alignment, and in the native check of \cmd{spin\_combine.py} both channels
+have the same energy offset.
 
-\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_up.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit, spin up: bands relative to the common $E_F$ of the model (\cmd{fitting/metal-joint/spin\_up}).\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_down.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit, spin down (\cmd{fitting/metal-joint/spin\_down}); moment of the model 2.23~$\mu_B$.\par}\end{minipage}\par\medskip
+\paragraph{The remaining errors of Fe.} \emph{Bottom of the $s$ band.} After stage (1) the lowest band had a ``W'' shape near
+$\Gamma$ (a local maximum at $\Gamma$, $-0.53$~eV error just off it) where PBE has a parabola. That band is $4s$ with a
+\emph{negative} Mulliken $4p$ weight ($-0.25$ halfway $\Gamma$--H): the $s$--$p$ overlap is large, and the $s$--$p$ coupling,
+zero at $\Gamma$ by symmetry, pushes the band down just off $\Gamma$ more than the $s$--$s$ dispersion raises it. The
+\cmd{metal} weight $g(E)$ is only $\approx0.15$ at $-8$~eV, so the fit did not see it; weighting that band (stage 2) halves the
+error, for $+0.006$~eV within 1~eV of $E_F$ and $0.02\,\mu_B$ of moment. \emph{Unoccupied $d$ bands of the down channel}
+($+1.5\ldots+3$~eV; RMS 0.13--0.25~eV against 0.04--0.06~eV for the $d$ bands of the up channel): the $e_g$--$t_{2g}$ splitting
+at $\Gamma$ is 1.55~eV in EHT and 1.94~eV in PBE, while the up channel reproduces its own. Neither more weight on these bands
+(\cmd{--objective-down "band\_weights=v4:3 v5:3 v6:3"}) nor one $K$ per channel (\cmd{--k-per-channel}) changes them (within
+0.01~eV): one double-zeta $d$ shell per channel in the EHT form cannot give the crystal-field splitting of both channels, so a
+better fit needs a different basis, not other weights.
+
+\noindent\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_up.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit (stage 2), spin up: bands relative to the common $E_F$ of the model (\cmd{fitting/metal-joint/spin\_up}).\par}\end{minipage}\hfill\begin{minipage}[t]{0.485\textwidth}\centering\includegraphics[width=\linewidth]{validation_figs/vasp_Fe_bcc_pbe_spin_joint_down.jpg}\\[-1pt]{\footnotesize\raggedright Fe bcc, joint fit, spin down (\cmd{fitting/metal-joint/spin\_down}); moment of the model 2.21~$\mu_B$.\par}\end{minipage}\par\medskip
 
 % ================================================================ 6e
 \section{Validation: best fits}\label{sec:validation}

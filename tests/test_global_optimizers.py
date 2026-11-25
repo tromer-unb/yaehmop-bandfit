@@ -150,3 +150,49 @@ class AlternatingTests(unittest.TestCase):
     def test_needs_the_fast_settings(self):
         f,_=make_objective()
         with self.assertRaises(ValueError):run_global("alternating",f,X0,BOUNDS,30)
+
+
+class ParallelPolishTests(unittest.TestCase):
+    """The local searches of the polish starts run in threads: same result and history as one by one."""
+
+    def history(self):
+        rng=np.random.default_rng(3)
+        rows=[]
+        for _ in range(40):
+            x=np.array([rng.uniform(a,b) for a,b in BOUNDS])
+            z=(x-TARGET)/np.array([8.,3.5,8.])
+            rows.append({"loss":float(np.sum(z**2)+.1),"x":list(x)})
+        return rows
+
+    def test_same_result_as_sequential(self):
+        for method in POLISH_METHODS:
+            with self.subTest(method=method):
+                hist=self.history()
+                f1,_=make_objective();f2,_=make_objective()
+                seq=polish(f1,hist,BOUNDS,80,method,n_starts=4,prefix=10)
+                par=polish(f2,hist,BOUNDS,80,method,n_starts=4,prefix=10,parallel=4)
+                self.assertEqual(par["parallel"],4)
+                self.assertEqual(seq["evaluations"],par["evaluations"])
+                self.assertAlmostEqual(seq["best_loss"],par["best_loss"],places=12)
+                self.assertTrue(np.allclose(seq["best_x"],par["best_x"]))
+                self.assertEqual([h["eval"] for h in seq["history"]],[h["eval"] for h in par["history"]])
+                self.assertEqual([h["stage"] for h in seq["history"]],[h["stage"] for h in par["history"]])
+
+    def test_faster_with_a_slow_objective(self):
+        import time
+        f,_=make_objective()
+        def slow(x,eid,stage):
+            time.sleep(0.01)
+            return f(x,eid,stage)
+        hist=self.history()
+        t=time.time();polish(slow,hist,BOUNDS,40,"nelder-mead",n_starts=4);t_seq=time.time()-t
+        t=time.time();polish(slow,hist,BOUNDS,40,"nelder-mead",n_starts=4,parallel=4);t_par=time.time()-t
+        self.assertLess(t_par,0.6*t_seq)
+
+    def test_run_global_reports_parallel_polish(self):
+        if not available("differential-evolution"):self.skipTest("optimizer unavailable")
+        f,_=make_objective();many,_=make_many(f)
+        r=run_global("differential-evolution",f,X0,BOUNDS,60,seed=7,polish_method="nelder-mead",
+                     objective_many=many,parallel=4)
+        self.assertEqual(r["polish"]["parallel"],4)
+        self.assertEqual(r["evaluations"],60)

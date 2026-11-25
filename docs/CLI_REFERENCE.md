@@ -34,7 +34,7 @@ python USER_WORKFLOW/bands_fit.py STRUCTURE.cif SETTINGS.ini [options]
 | `--prepare-only` | **Fast**: decode, extract, encode PNG bitplanes, preview and QA; **no YAeHMOP**. |
 | `--budget N` | Requested physical solver objective evaluations. Only used when actually fitting. Staged fitting requires at least 80; SA refinements require >=160. |
 | `--optimizer NAME` | Fitting algorithm (also `optimizer =` in `[fit]`). See [Optimizers](#optimizers) below. |
-| `--polish {nelder-mead,powell}` | Local refinement after a global optimizer, using 25% of the same budget (also `polish =` in `[fit]`). |
+| `--polish {nelder-mead,powell}` | Local refinement after a global optimizer, using 25% of the same budget, split among up to 4 distinct starting points whose local searches run at the same time (one thread each with `--parallel` > 1; same result as one by one) (also `polish =` in `[fit]`). |
 | `--seed INTEGER` | Random seed for stochastic optimizers, default `20261014`. |
 | `--from-fit path/to/fit.json` | **Runs solver**: load a saved fit's native parameter file and stored K, verify CIF SHA, regenerate all physical orbitals and plot. |
 | `--from-parameters PATH` | **Runs solver**: compute full original YAeHMOP bands with YOUR table; skips image fitting. |
@@ -226,6 +226,8 @@ of the fork: `--parm-up/--parm-down`, `--common-fermi`); method and Fe results i
 | `--mesh-radius`, `--smearing`, `--sigma` | k mesh (2r+1)^dim of the common Fermi level (default 7), occupations `mp1` / `gaussian` / `fermi`, width (0.1 eV) |
 | `--moment`, `--w-moment` | DFT moment (default: VASP `OSZICAR`); weight of \|m_model − m_DFT\| (default 0: reported only) |
 | `--shared-zetas` | the same exponents in both channels |
+| `--k-per-channel` | one K per channel (default: one K for both; in bcc Fe it changes nothing) |
+| `--objective KEY=VALUE`, `--objective-up`, `--objective-down` | objective settings (repeatable) for both channels or one channel, over those of the start fits, e.g. `--objective band_weights=v1:5 --objective w_bands=2` (`v<j>` counts metal bands from the bottom; `w_bands` must be > 0 for the band weights to count) |
 | `--parallel` | concurrent candidates (default: half the CPUs) |
 | `--outdir` | `fit/` (fit.json, history, progress, parameter tables), `up/`, `down/` (figures), `fitting/spin_up`, `spin_down`, `spin_polarized` (`huckel-SP.dat`) |
 

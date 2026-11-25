@@ -93,12 +93,15 @@ class SpinJointFitter:
 
     def __init__(self, samples, tables, K0, wset, *, bind, nelec, mesh_radius=7, smearing="mp1",
                  sigma=0.1, moment_ref=None, w_moment=0.0, shared_zetas=False, reg_weight=0.04,
-                 overlap_min_eig=1e-3, workdir, parallel=1, hii_window=5.0, zeta_window=None, k_window=0.6):
+                 overlap_min_eig=1e-3, workdir, parallel=1, hii_window=5.0, zeta_window=None, k_window=0.6,
+                 k_per_channel=False):
         self.s = samples                      # {"up": sample, "down": sample} (fit_sparse_window format)
         s0 = samples["up"]
         self.elements = list(s0["elements"])
         self.bind, self.nelec = bind, nelec
-        self.wset, self.smearing, self.sigma = wset, smearing, float(sigma)
+        # objective settings: one WindowSettings for both channels, or {"up": ..., "down": ...}
+        self.wset = wset if isinstance(wset, dict) else {ch: wset for ch in CHANNELS}
+        self.smearing, self.sigma = smearing, float(sigma)
         self.moment_ref, self.w_moment = moment_ref, float(w_moment)
         self.shared_zetas, self.reg_w = bool(shared_zetas), float(reg_weight)
         self.overlap_min_eig = float(overlap_min_eig)
@@ -122,11 +125,16 @@ class SpinJointFitter:
                     # refining earlier fits: exponents within +-zeta_window (relative) of the start
                     b = (max(b[0], v * (1 - zeta_window)), min(b[1], v * (1 + zeta_window)))
                 specs.append((ch, el, orb, kind)); x0.append(v); bounds.append(b); scales.append(c)
-        specs.append(("GLOBAL", "", "", "K")); x0.append(float(K0))
-        bounds.append((max(1.0, K0 - k_window), min(2.8, K0 + k_window))); scales.append(0.4)
+        # one K for both channels, or one per channel (k_per_channel; GLOBAL = spin up)
+        K0 = K0 if isinstance(K0, dict) else {ch: float(K0) for ch in CHANNELS}
+        for ch in (CHANNELS if k_per_channel else ("up",)):
+            specs.append(("GLOBAL" if ch == "up" else "down", "", "", "K")); x0.append(float(K0[ch]))
+            bounds.append((max(1.0, K0[ch] - k_window), min(2.8, K0[ch] + k_window))); scales.append(0.4)
+        self.k_per_channel = bool(k_per_channel)
         self.specs, self.stock = specs, np.asarray(x0, float)
         self.bounds, self.scales = bounds, np.asarray(scales, float)
-        self.names = [f"{ch}_{el}_{orb}_{kind}".replace("GLOBAL___", "GLOBAL_") for ch, el, orb, kind in specs]
+        self.names = [f"{ch}_{el}_{orb}_{kind}".replace("GLOBAL___", "GLOBAL_").replace("down___K", "down_K")
+                      for ch, el, orb, kind in specs]
         self.lock = threading.Lock()
         self.calls, self.best_loss = 0, float("inf")
         self.rejected = 0
@@ -136,10 +144,10 @@ class SpinJointFitter:
     # ---------------- parameters ----------------
     def tables_from_x(self, x):
         t = {ch: copy.deepcopy(self.tables[ch]) for ch in CHANNELS}
-        K = None
+        K = {}
         for (ch, el, orb, kind), v in zip(self.specs, np.asarray(x, float)):
             if kind == "K":
-                K = float(v)
+                K["down" if ch == "down" else "up"] = float(v)
                 continue
             targets = [ch] if not (self.shared_zetas and kind != "Hii") else list(CHANNELS)
             for c in targets:
@@ -152,6 +160,7 @@ class SpinJointFitter:
                 for orb in ("s", "p", "d", "f"):
                     if orb in sp and int(sp[orb].get("nzeta", 1)) == 2 and sp[orb]["zeta1"] <= sp[orb]["zeta2"] + 0.12:
                         raise ValueError("invalid double-zeta parameters")
+        K.setdefault("down", K["up"])           # one K for both channels
         return t, K
 
     # ---------------- bind runs ----------------
@@ -165,13 +174,13 @@ class SpinJointFitter:
         try:
             write_parameter_file(d / "up.dat", tables["up"])
             write_parameter_file(d / "down.dat", tables["down"])
-            write_sample_input(s, d / "path.bind", K)
-            write_periodic_input_generic(s["cif"], d / "mesh.bind", None, K, True, self.nelec,
+            write_sample_input(s, d / "path.bind", K["up"])
+            write_periodic_input_generic(s["cif"], d / "mesh.bind", None, K["up"], True, self.nelec,
                                          overlap_images=s["overlap_images"], periodic_dim=s["periodic_dim"],
                                          structure_format=s.get("structure_format"),
                                          kpoints=self.mesh if mesh is None else mesh, average_properties=True)
             args = ["--parm-up", "up.dat", "--parm-down", "down.dat",
-                    "--const-up", f"{K:.12g}", "--const-down", f"{K:.12g}"]
+                    "--const-up", f"{K['up']:.12g}", "--const-down", f"{K['down']:.12g}"]
             run_bind_args(self.bind, args, "path.bind", None, d / "path.log", cwd=d)
             run_bind_args(self.bind, args + ["--common-fermi"], "mesh.bind", None, d / "mesh.log", cwd=d)
             out = dict(bands={}, eig={}, smin=np.inf)
@@ -201,7 +210,7 @@ class SpinJointFitter:
             E = r["bands"][ch][s["kmask"]]
             if E.shape != (len(s["kx"]), s["norb"]):
                 raise ValueError("physical EHT spectrum shape mismatch")
-            per[ch] = metal_error(s["target_all"], E, s["kx"], [x for x, _ in s["ticks"]], self.wset, shift=-mu)
+            per[ch] = metal_error(s["target_all"], E, s["kx"], [x for x, _ in s["ticks"]], self.wset[ch], shift=-mu)
         return mu, nu, nd, m, per
 
     def evaluate(self, x, call):
@@ -210,7 +219,7 @@ class SpinJointFitter:
             raise ValueError(f"overlap S(k) not positive definite enough (min eigenvalue {r['smin']:.2e})")
         mu, nu, nd, m, per = self.scores(r)
         cost = float(np.mean([per[ch]["total"] for ch in CHANNELS]))
-        line = dict(K=r["K"], eht_fermi_eV=mu, electrons_up=nu, electrons_down=nd, moment=m,
+        line = dict(K_up=r["K"]["up"], K_down=r["K"]["down"], eht_fermi_eV=mu, electrons_up=nu, electrons_down=nd, moment=m,
                     bind_fermi_eV=r["bind_fermi"], overlap_min_eig=r["smin"])
         for ch in CHANNELS:
             line[f"{ch}_total"] = per[ch]["total"]

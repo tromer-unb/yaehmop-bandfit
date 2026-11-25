@@ -49,7 +49,7 @@ def start_tables(args, elements):
     """Starting tables, K and objective settings: from the fitting/ folders of earlier fits, or stock."""
     _, table = resolve_yaehmop_assets()
     stock = subset_for_elements(parse_parameter_table(table), elements)
-    tables, Ks, settings, radius = {}, [], None, None
+    tables, Ks, settings, radius = {}, {}, None, None
     for ch, d in (("up", args.start_up), ("down", args.start_down)):
         if d is None:
             tables[ch] = stock
@@ -60,10 +60,11 @@ def start_tables(args, elements):
         if sj.is_file():
             s = json.loads(sj.read_text())
             if s.get("K_EHT") is not None:
-                Ks.append(float(s["K_EHT"]))
+                Ks[ch] = float(s["K_EHT"])
             settings = settings or s.get("objective_settings")
             radius = radius or s.get("overlap_radius") or (s.get("tight_binding_files") or {}).get("overlap_radius")
-    return tables, (float(np.mean(Ks)) if Ks else 1.75), settings, radius
+    mean = float(np.mean(list(Ks.values()))) if Ks else 1.75
+    return tables, {ch: Ks.get(ch, mean) for ch in ("up", "down")}, settings, radius
 
 
 def main():
@@ -89,6 +90,15 @@ def main():
     ap.add_argument("--w-moment", type=float, default=0.0,
                     help="weight of |m_model - m_DFT| in the objective (eV per Bohr magneton; default 0 = report only)")
     ap.add_argument("--shared-zetas", action="store_true", help="the same Slater exponents for both channels")
+    ap.add_argument("--k-per-channel", action="store_true",
+                    help="one Wolfsberg-Helmholz constant K per channel (default: one K for both)")
+    ap.add_argument("--objective", action="append", default=[], metavar="KEY=VALUE",
+                    help="objective setting for both channels (repeatable), e.g. band_weights=v1:5 or window_max=3.5; "
+                         "default: the settings of the start fits")
+    ap.add_argument("--objective-up", action="append", default=[], metavar="KEY=VALUE",
+                    help="objective setting for the spin-up channel only (repeatable)")
+    ap.add_argument("--objective-down", action="append", default=[], metavar="KEY=VALUE",
+                    help="objective setting for the spin-down channel only (repeatable)")
     ap.add_argument("--hii-window", type=float, default=None,
                     help="bounds of each Hii: start +- this (eV); default 1.5 when starting from earlier fits, else 5")
     ap.add_argument("--zeta-window", type=float, default=None,
@@ -145,7 +155,20 @@ def main():
     for ch in CHANNELS:
         e = dict(L[ch]["entry"], overlap_radius=radius)
         samples[ch] = parse_metal_sample(e, {}, {}, cif, Path(e["reference"]), sfmt, atoms, syms, norb, nelec)
-    wset = WindowSettings.from_dict(settings)
+    def kv(items, opt):
+        out = {}
+        for it in items:
+            if "=" not in it:
+                ap.error(f"{opt} takes KEY=VALUE, not {it!r}")
+            k_, v_ = it.split("=", 1)
+            out[k_.strip()] = v_.strip()
+        return out
+    base = {**(settings or {}), **kv(a.objective, "--objective")}
+    try:
+        wsets = {"up": WindowSettings.from_dict({**base, **kv(a.objective_up, "--objective-up")}),
+                 "down": WindowSettings.from_dict({**base, **kv(a.objective_down, "--objective-down")})}
+    except ValueError as exc:
+        ap.error(str(exc))
     moment, msrc = (a.moment, "--moment") if a.moment is not None else read_dft_moment(a.dft_dir, code)
     if a.w_moment > 0 and moment is None:
         ap.error("--w-moment needs the DFT moment (--moment)")
@@ -158,10 +181,13 @@ def main():
     hii_w = a.hii_window if a.hii_window is not None else (1.5 if refine else 5.0)
     zeta_w = a.zeta_window if a.zeta_window is not None else (0.25 if refine else None)
     sigma0 = a.sigma0 if a.sigma0 is not None else (0.02 if refine else 0.25)
-    f = SpinJointFitter(samples, tables, K0, wset, bind=bind, nelec=nelec, mesh_radius=a.mesh_radius,
+    if not a.k_per_channel:
+        K0 = float(np.mean(list(K0.values())))
+    f = SpinJointFitter(samples, tables, K0, wsets, bind=bind, nelec=nelec, mesh_radius=a.mesh_radius,
                         smearing=a.smearing, sigma=a.sigma, moment_ref=moment, w_moment=a.w_moment,
                         shared_zetas=a.shared_zetas, reg_weight=a.reg_weight, workdir=out / "fit" / "work",
-                        parallel=par, hii_window=hii_w, zeta_window=zeta_w, k_window=0.3 if refine else 0.6)
+                        parallel=par, hii_window=hii_w, zeta_window=zeta_w, k_window=0.3 if refine else 0.6,
+                        k_per_channel=a.k_per_channel)
     print(f"SPIN_JOINT {name}: {len(f.names)} parameters, {nelec} electrons, mesh {2 * a.mesh_radius + 1}^{dim}, "
           f"smearing {a.smearing} {a.sigma} eV, DFT moment {moment} ({msrc}), {par} candidates in parallel", flush=True)
     c0, line0 = f.objective(f.stock)
@@ -191,7 +217,7 @@ def main():
     for ch in CHANNELS:
         write_parameter_file(fitdir / f"param_best_{ch}.dat", tables_best[ch])
         (fitdir / f"param_best_{ch}.txt").write_text(
-            f"K_EHT {K:.12g}\n" + "".join(f"{n_} {float(v):.12g}\n" for n_, v in zip(f.names, x)))
+            f"K_EHT {K[ch]:.12g}\n" + "".join(f"{n_} {float(v):.12g}\n" for n_, v in zip(f.names, x)))
     hist = res["history"]
     keys = list(dict.fromkeys(k for row in hist for k in row))
     with (fitdir / "history.csv").open("w", newline="") as stream:
@@ -203,7 +229,8 @@ def main():
                  dense_mesh=dict(mesh=f"Gamma-centred 25^{dim}", eht_fermi_eV=mu_d, electrons_up=nu_d,
                                  electrons_down=nd_d, moment=m_d),
                  bind_common_fermi_T0_eV=r["bind_fermi"], dft_moment=moment, dft_moment_source=msrc,
-                 w_moment=a.w_moment, shared_zetas=a.shared_zetas, K_EHT=K, overlap_min_eig=r["smin"],
+                 w_moment=a.w_moment, shared_zetas=a.shared_zetas, K_EHT=K, k_per_channel=a.k_per_channel,
+                 overlap_min_eig=r["smin"],
                  bounds=dict(hii_window_eV=hii_w, zeta_window=zeta_w, cmaes_sigma0=sigma0))
     state = dict(name=name, optimizer=res["optimizer"], polish=res.get("polish"), budget=a.budget,
                  objective_evaluations=res["evaluations"], rejected_candidates=f.rejected,
@@ -211,7 +238,7 @@ def main():
                  best_x={n_: float(v) for n_, v in zip(f.names, x)},
                  stock_x={n_: float(v) for n_, v in zip(f.names, f.stock)},
                  start_up=str(a.start_up) if a.start_up else None, start_down=str(a.start_down) if a.start_down else None,
-                 objective_settings=wset.to_dict(), overlap_radius=radius, periodic_dim=dim, joint=joint,
+                 objective_settings={ch: wsets[ch].to_dict() for ch in CHANNELS}, overlap_radius=radius, periodic_dim=dim, joint=joint,
                  metrics={ch: per[ch] for ch in CHANNELS}, time_s=time.time() - t0)
     (fitdir / "fit.json").write_text(json.dumps(state, indent=2, default=float) + "\n")
 
@@ -228,14 +255,14 @@ def main():
                             YAeHMOP_all=E, tick_x=np.array([t for t, _ in s["ticks"]], float),
                             tick_labels=np.array([l for _, l in s["ticks"]]), metallic=True,
                             dft_fermi=s["dft_fermi"], eht_fermi=mu,
-                            window=np.array([wset.window_min, wset.window_max]))
+                            window=np.array([wsets[ch].window_min, wsets[ch].window_max]))
         pm = bf.write_metal_plots(npz, d, title=f"{name} — joint spin fit vs DFT (spin {ch})",
                                   align_note="common E$_F$ of the spin-polarized model")
         info = L[ch]["info"]
         summary = dict(name=f"{name}_{ch}", reference_type="dft", metallic=True, dft_reference=info,
-                       objective="metal (joint spin fit, common Fermi level)", objective_settings=wset.to_dict(),
+                       objective="metal (joint spin fit, common Fermi level)", objective_settings=wsets[ch].to_dict(),
                        metrics=per[ch], window_metrics=per[ch], selected_rmse_eV=pm["rmse"],
-                       rms_within_1eV_of_EF_eV=pm["near"], eht_fermi_eV=mu, K_EHT=K, periodic_dim=dim,
+                       rms_within_1eV_of_EF_eV=pm["near"], eht_fermi_eV=mu, K_EHT=K[ch], periodic_dim=dim,
                        overlap_radius=radius, joint_spin_fit=joint, optimizer_choice=a.optimizer,
                        polish=a.polish, requested_total_budget=a.budget,
                        optimizer_evaluations=res["evaluations"],
@@ -243,7 +270,7 @@ def main():
                             "Fermi level of the model (H(R) - E_F*S(R)), the same for both channels")
         bf.write_fitting_dir(out / "fitting" / f"spin_{ch}", d, structure=cif, sfmt=sfmt,
                              native=fitdir / f"param_best_{ch}.dat", param_txt=fitdir / f"param_best_{ch}.txt",
-                             K=K, kpoints=kpts, dim=dim, radius=radius, summary=summary, node_index=nodes,
+                             K=K[ch], kpoints=kpts, dim=dim, radius=radius, summary=summary, node_index=nodes,
                              energy_zero=mu)
         print(f"CHANNEL {ch}: window RMS {per[ch]['window_rms_eV']:.4f} eV, within 1 eV of E_F "
               f"{per[ch]['rms_within_1eV_of_EF_eV']:.4f} eV", flush=True)
