@@ -189,7 +189,8 @@ Or with a plain virtual environment:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python quick.py          # saved paper figures, no physics calculation
+python quick.py          # tour of the saved best fits, no physics calculation
+python quick.py paper    # the saved figures of the original study
 \end{lstlisting}
 
 Python 3.10 or newer is recommended (Linux or macOS). Dependencies: \cmd{numpy}, \cmd{scipy}, \cmd{ase},
@@ -319,6 +320,161 @@ with the live loss of the running fit.}\label{fig:gui-progress}
 keys) and, below, one table for two silicon polymorphs (QE, LDA: diamond and wurtzite; CMA-ES 3000 + polish,
 \cmd{overlap\_radius: auto}, extra shells \cmd{auto}) with the family overview and the errors of every member.}\label{fig:gui-family}
 \end{figure}
+\clearpage
+
+\section{Fitting from the command line (CLI), step by step}\label{sec:cli}
+Everything the graphical interface does can be run from a terminal; this is the way to go on a cluster, in scripts and for
+long fits. The commands below were checked on the examples of \cmd{validation/}. Each script lists all its options with
+\cmd{--help}; section~\ref{sec:cmdref} and \cmd{docs/CLI\_REFERENCE.md} describe them.
+
+\subsection{Before you start}
+\begin{lstlisting}[style=sh]
+conda activate yaehmop-bandfit            # environment of install.sh
+cd yaehmop-bandfit                        # run from the repository root
+echo $YAEHMOP_BIND $YAEHMOP_PARAM_FILE    # solver and parameter table set?
+\end{lstlisting}
+\cmd{install.sh --build-yaehmop} sets both variables (section~\ref{sec:gui} has the same requirement). The spin and SOC tools
+need the \cmd{bind} of the fork github.com/ac-dias/yaehmop; \cmd{install.sh} reports whether yours has it.
+
+\subsection{Fit to a DFT band calculation (the usual case)}
+A DFT fit needs only the folder of the band-structure run and a short settings file (INI). The structure, the $k$ path and the
+occupied bands are read from the DFT files (VASP, Quantum ESPRESSO, SIESTA, FHI-aims, Wannier90;
+section~\ref{sec:dft}). A minimal INI (\cmd{examples/configs/dft\_template.ini} lists every key):
+\begin{lstlisting}[style=ini]
+[reference]
+emin = -6            # range of the full figure (eV)
+emax = 6
+
+[band_path]
+points_per_segment = 20
+
+[fit]
+objective = window   # all bands of a window (DFT default)
+budget = 2000        # YAeHMOP runs
+optimizer = cmaes
+polish = nelder-mead
+\end{lstlisting}
+
+\paragraph{Step 1: read and check the reference (no solver).}
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py my.ini --dft-dir validation/qe/Si_diamond_lda \
+    --dft-code qe --outdir runs/Si --prepare-only
+\end{lstlisting}
+It prints what was read (\cmd{DFT\_REFERENCE}: bands, occupied bands, gap, periodic dimension, path) and draws
+\cmd{runs/Si/dft\_reference/dft\_bands\_preview.png}. Look at it before fitting: wrong occupied bands are fixed with
+\cmd{valence\_bands = N} in \cmd{[reference]}, a wrong periodic dimension with \cmd{--dimension}.
+
+\paragraph{Step 2: fit.} The same command without \cmd{--prepare-only}:
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py my.ini --dft-dir validation/qe/Si_diamond_lda \
+    --dft-code qe --outdir runs/Si
+\end{lstlisting}
+Every command-line option overrides the INI (\cmd{--budget}, \cmd{--optimizer}, \cmd{--polish}, \cmd{--objective},
+\cmd{--overlap-radius auto}, \cmd{--basis-add auto}, \cmd{--parallel}). While it runs, \cmd{runs/Si/fit/progress.csv} has one line
+per evaluation (call, loss, best loss so far): \cmd{tail -f runs/Si/fit/progress.csv}. At the end it prints \cmd{USER\_FIT\_DONE}
+with the errors.
+
+\paragraph{Step 3: read the results.} \cmd{runs/Si/bands\_full\_comparison.png} shows all DFT bands (blue) against all EHT bands
+(red dashed); \cmd{runs/Si/fitting/} is the standard output folder (section~\ref{sec:outputs}): \cmd{parameters\_huckel.dat}
+(the table for \cmd{bind}), \cmd{parameters\_huckel.txt} ($K$ and every fitted variable), \cmd{fit\_summary.json} (errors,
+settings, checks), \cmd{huckel-NP.dat}, \cmd{basis\_set-NP} and \cmd{huckel-NP\_r.dat} (WanTiBEXOS: Hamiltonian, basis and
+position matrix; \cmd{--no-rmatrix} skips the last). \cmd{--fitting-dir DIR} writes that folder
+elsewhere.
+
+\paragraph{Step 4: refine.} A second fit can start from the first one; the bounds are then centred on it:
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py my2.ini --dft-dir validation/qe/Si_diamond_lda \
+    --dft-code qe --outdir runs/Si_refine --start-from runs/Si/fitting
+\end{lstlisting}
+Typical changes in \cmd{my2.ini}: more weight on chosen bands (\cmd{band\_weights = v1:10 c1:10} and \cmd{w\_bands = 8} in
+\cmd{[objective]}), extra shells (\cmd{basis\_add = auto} or \cmd{S:d}), a larger budget (section~\ref{sec:strategies}). The
+INIs of the best validation fits are in \cmd{validation/refine*/} and are good starting points.
+
+\paragraph{Step 5: evaluate a table without fitting.} Score a finished fit, or any table, against a DFT run (the same or
+another one) and write the figures and \cmd{fitting/}:
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/bands_fit.py my.ini --dft-dir D --dft-code qe \
+    --outdir runs/eval --from-fit runs/Si_refine/fit/fit.json
+python USER_WORKFLOW/bands_fit.py my.ini --dft-dir D --dft-code qe \
+    --outdir runs/eval2 --from-parameters table.dat --k 1.75
+\end{lstlisting}
+
+\subsection{Metals}
+A metal has no gap: use \cmd{objective = metal} (or \cmd{--objective metal}) and give the Fermi level of the self-consistent
+run in \cmd{[reference]} (\cmd{fermi = 5.8639}); the bands are compared relative to $E_F$. Example INIs:
+\cmd{validation/refine\_fe/}.
+
+\subsection{Spin-polarized runs}
+Fit each channel (the two in parallel), join them, and, for a metal, refit both channels together with one common Fermi level
+(section~\ref{sec:spin}):
+\begin{lstlisting}[style=sh]
+F=validation/vasp/Fe_bcc_pbe_spin
+for ch in up down; do
+  python USER_WORKFLOW/bands_fit.py validation/refine_fe/Fe_metal.ini --dft-dir $F \
+      --spin-channel $ch --outdir runs/Fe_$ch --fitting-dir runs/Fe/fitting/spin_$ch &
+done; wait
+python USER_WORKFLOW/spin_combine.py --up runs/Fe/fitting/spin_up \
+    --down runs/Fe/fitting/spin_down --outdir runs/Fe/fitting/spin_polarized
+python USER_WORKFLOW/spin_joint_fit.py --dft-dir $F --dft-code vasp \
+    --fermi 5.86385846 --start-up runs/Fe/fitting/spin_up \
+    --start-down runs/Fe/fitting/spin_down --budget 2000 --outdir runs/Fe_joint
+\end{lstlisting}
+\cmd{spin\_joint\_fit.py} writes \cmd{runs/Fe\_joint/fitting/spin\_up}, \cmd{spin\_down} and \cmd{spin\_polarized}; weights per
+channel go in \cmd{--objective}, \cmd{--objective-up}, \cmd{--objective-down} (e.g.\ \cmd{--objective band\_weights=v1:5
+--objective w\_bands=2}).
+
+\subsection{Spin--orbit coupling}
+SOC is fitted on top of a spinless fit (its EHT table stays fixed; only the on-site $\lambda$ are fitted) against a DFT run with
+SOC (section~\ref{sec:soc}):
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/soc_fit.py --dft-dir DFT_SOC_FOLDER --dft-code aims \
+    --from-fitting runs/MoS2/fitting --outdir runs/MoS2_soc
+\end{lstlisting}
+
+\subsection{Pictures or CSV of the bands}
+Without DFT files, the reference can be a picture or a CSV of the bands plus the structure file:
+\cmd{bands\_fit.py structure.cif settings.ini --image bands.png --outdir runs/X}, with the axis and $k$ path in the INI. The
+steps are those of section~\ref{sec:direct} (check with \cmd{--prepare-only}, fit, recompute with \cmd{--from-fit}).
+
+\subsection{Several systems with one table}
+\cmd{family\_fit.py} fits one parameter vector to several references (DFT folders of any code, pictures, CSV), described in a
+YAML manifest (section~\ref{sec:family}):
+\begin{lstlisting}[style=sh]
+python USER_WORKFLOW/family_fit.py family.yaml --validate-only   # no data read
+python USER_WORKFLOW/family_fit.py family.yaml --fit --optimizer cmaes \
+    --polish nelder-mead --budget 3000 --outdir runs/family
+\end{lstlisting}
+
+\subsection{Long fits}
+\begin{itemize}[nosep]
+\item Run in the background and keep the log: \cmd{nohup python USER\_WORKFLOW/bands\_fit.py ... > fit.log 2>\&1 \&};
+  follow it with \cmd{tail -f runs/X/fit/progress.csv}.
+\item The population optimizers (\cmd{cmaes}, \cmd{differential-evolution}, \cmd{genetic}, \cmd{bayesian}) evaluate
+  \cmd{--parallel} candidates at once (default: CPUs / systems), and the polish runs its starting points at the same time; run one
+  fit at a time with all cores rather than several fits sharing them.
+\item \cmd{--overlap-radius auto} picks the smallest converged lattice sum (bulk: usually 3--4 instead of 5), the largest
+  saving for 3D crystals.
+\item \cmd{--seed} makes a fit reproducible; \cmd{--budget} is a hard limit on the YAeHMOP runs.
+\end{itemize}
+
+\begin{center}\footnotesize
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.27\textwidth} L}
+\toprule
+Task & Command \\
+\midrule
+check a DFT reference & \cmd{bands\_fit.py my.ini --dft-dir D --dft-code C --outdir O --prepare-only} \\
+fit to DFT & \cmd{bands\_fit.py my.ini --dft-dir D --dft-code C --outdir O} \\
+refine an earlier fit & \cmd{... --start-from O/fitting} \\
+evaluate a table & \cmd{... --from-fit O/fit/fit.json} or \cmd{--from-parameters T --k K} \\
+metal & \cmd{--objective metal}, \cmd{fermi =} in \cmd{[reference]} \\
+one spin channel & \cmd{--spin-channel up|down} \\
+join two channels & \cmd{spin\_combine.py --up U --down D --outdir O} \\
+both channels together & \cmd{spin\_joint\_fit.py --dft-dir D --dft-code C --start-up U --start-down D --outdir O} \\
+spin--orbit & \cmd{soc\_fit.py --dft-dir D --dft-code C --from-fitting O/fitting --outdir O2} \\
+picture / CSV & \cmd{bands\_fit.py structure.cif my.ini --image bands.png --outdir O} \\
+several systems & \cmd{family\_fit.py family.yaml --fit --outdir O} \\
+\bottomrule
+\end{tabularx}\end{center}
 \clearpage
 
 \section{Inputs}
@@ -503,7 +659,7 @@ The round-trip error reported in the QA measures only this encoding, not the acc
 digitization or of the DFT.
 
 % ================================================================ 4
-\section{Direct fit, step by step}
+\section{Direct fit, step by step}\label{sec:direct}
 
 \subsection{1. Prepare and check the reference (no solver)}
 
@@ -578,6 +734,8 @@ bands\_on\_original.png & (picture references) the fitted EHT bands drawn over t
 huckel-NP.dat & real-space Hamiltonian $H(\mathbf R)$ and overlap $S(\mathbf R)$ in the WanTiBEXOS
   non-orthogonal format (read with \cmd{DFT= S}) \\
 basis\_set-NP & WanTiBEXOS basis file: \cmd{index species x y z l m spin} (positions in \AA) \\
+huckel-NP\_r.dat & position matrix $\langle m,\mathbf 0|\mathbf r|n,\mathbf R\rangle$ (\AA) of the Slater basis, Wannier90
+  \cmd{seedname\_r.dat} layout: WanTiBEXOS \cmd{BSE\_CENTER\_FILE} (paragraph below; \cmd{--no-rmatrix} skips it) \\
 orbitals.dat & orbital index, atom, orbital name, $l$, $m$, in YAeHMOP order \\
 hamiltonian\_overlap\_k.dat & $H(\mathbf k)$ and $S(\mathbf k)$ at the high-symmetry points of the band
   figure (raw YAeHMOP values) \\
@@ -625,6 +783,28 @@ eigenvalue is written to \cmd{fit\_summary.json} (\cmd{overlap\_min\_eigenvalue}
 s; $p_x,p_y,p_z$; $d_{x^2-y^2},d_{z^2},d_{xy},d_{xz},d_{yz}$; f. The $(l,m)$ follow sisl's real spherical
 harmonics: $p_x$ $m{=}1$, $p_y$ $m{=}{-1}$, $p_z$ $m{=}0$; $d_{xy}$ $-2$, $d_{yz}$ $-1$, $d_{z^2}$ 0, $d_{xz}$ 1,
 $d_{x^2-y^2}$ 2.
+
+\paragraph{\cmd{huckel-NP\_r.dat}: the position matrix.} For excitons and optical spectra WanTiBEXOS also takes the matrix
+elements of the position operator between basis orbitals, $X_{ij}(\mathbf R)=\langle\phi_i,\mathbf 0|\,\mathbf r\,|\phi_j,\mathbf R\rangle$
+(\AA, absolute coordinates), from \cmd{BSE\_CENTER\_FILE} with \cmd{DFT= S}; \cmd{siesta2wtb.py --rmatrix} writes it for SIESTA and
+the YAeHMOP interface \cmd{yaehmop2wtb.py --rmatrix} for YAeHMOP runs. Every export of the tool writes it too
+(\cmd{parameter\_fitter/position\_matrix.py}; the method is that of \cmd{yaehmop2wtb.py}, described in its \cmd{README}): the orbitals
+are YAeHMOP's Slater functions from the fitted table, with the coefficients normalized as \cmd{bind} does and the bohr of its
+overlaps; the integrals are numerical, in bipolar coordinates for two centres and spherical ones for one, with exact angular
+rules and Gauss--Legendre radial pieces graded near the nuclei and split at the kinks. The same quadrature gives $S(\mathbf R)$,
+compared with YAeHMOP's (\cmd{position\_matrix} in \cmd{fit\_summary.json}: $1.2\times10^{-8}$ for Si diamond, $3\times10^{-7}$ for
+MoS$_2$, limited by the 6 decimals of the tables). Pairs whose YAeHMOP overlap is below $10^{-8}$ are skipped, only one of each
+pair $\pm\mathbf R$ is integrated ($X_{ij}(-\mathbf R)=X_{ji}(\mathbf R)-\mathbf T_\mathbf R S_{ji}(\mathbf R)$), and the cells are
+shared among the CPUs: Si diamond with radius 5 (991 cells) takes about a minute. \cmd{soc\_fit.py} writes \cmd{huckel-SOC\_r.dat}
+(the same $X$ in both spin blocks) and \cmd{spin\_combine.py} joins the files of the two channels into \cmd{huckel-SP\_r.dat}.
+
+\paragraph{Frame of the matrices.} \cmd{bind} rebuilds the cell from the lengths and angles of \cmd{Crystal Spec} ($\mathbf a$ along
+$x$, $\mathbf b$ in the $xy$ plane), and its $p$, $d$, $f$ orbitals are oriented in that frame. The lattice vectors and $\mathbf R$
+of \cmd{huckel-*.dat}, the positions of \cmd{basis\_set-*}, the position matrix and \cmd{fitting/POSCAR} are written in that frame
+(same fractional coordinates as the input structure). For a 3D cell given in another orientation (the fcc primitive vectors of
+Si, for example) this differs from the POSCAR of the DFT run, while the bands are the same. (Exports before November 25, 2026
+wrote the cell and positions in the POSCAR frame; the bands were right, but for such cells the orientation of the orbitals did
+not match the positions.)
 
 \paragraph{\cmd{hamiltonian\_overlap\_k.dat}.} The same header as \cmd{huckel-NP.dat}, but with the Fermi level
 equal to the EHT midgap (absolute, since these $H(\mathbf k)$ are not shifted) and one more line with the number of
@@ -1079,8 +1259,8 @@ $E_F$. \cmd{fitting/metal-cmaes-10k/spin\_polarized/huckel-SP.dat} holds the joi
 $\Gamma$ and H are those of the two channel fits.
 
 \paragraph{Export to WanTiBEXOS.} The tool already writes the Hamiltonian for WanTiBEXOS: \cmd{huckel-NP.dat} (spinless),
-\cmd{huckel-SOC.dat} (spin--orbit) and \cmd{huckel-SP.dat} (spin-polarized), each with its \cmd{basis\_set-*} file, read with
-\cmd{DFT= S}; the spinless and SOC files were checked with \cmd{wtb.x} (same bands as YAeHMOP to $10^{-4}$~eV).
+\cmd{huckel-SOC.dat} (spin--orbit) and \cmd{huckel-SP.dat} (spin-polarized), each with its \cmd{basis\_set-*} file and its position
+matrix \cmd{huckel-*\_r.dat} (\cmd{BSE\_CENTER\_FILE}), read with \cmd{DFT= S}; the spinless and SOC files were checked with \cmd{wtb.x} (same bands as YAeHMOP to $10^{-4}$~eV).
 
 \paragraph{Native spin polarization of the fork.} With the \cmd{bind} of github.com/ac-dias/yaehmop, \cmd{spin\_combine.py}
 also runs the two channel tables together, \cmd{bind --parm-up up.dat --parm-down down.dat --const-up $K_\uparrow$
@@ -1186,7 +1366,7 @@ target must be in the table. If the target had been inspected before, the evalua
 not prospectively blind.
 
 % ================================================================ 8
-\section{Family fit: one vector for several systems}
+\section{Family fit: one vector for several systems}\label{sec:family}
 
 \cmd{family\_fit.py} fits \emph{one} parameter table and one $K$ to several systems at once, for example
 one table per composition valid for several polymorphs and thicknesses. Every reference of
@@ -1249,7 +1429,7 @@ prototype that traces all orbitals.
 \section{Results of the original study}
 
 The main study fits six Ge/Sn chalcogenides with 2, 4, 6 and 8 matched bands against Materials Cloud
-PBE references (not redistributed). \cmd{python3 quick.py} shows the saved results without any solver.
+PBE references (not redistributed). \cmd{python3 quick.py paper} shows these saved results without any solver; \cmd{python3 quick.py} alone is a tour of the current features (the saved DFT, spin and spin--orbit fits of \cmd{validation/} and their WanTiBEXOS files).
 
 \begin{figure}[h]
 \centering
@@ -1300,7 +1480,7 @@ extensions (graphene, phagraphene, diamond, graphite) use other PBE sources and 
 \end{itemize}
 
 % ================================================================ 11
-\section{Command reference: \cmd{bands\_fit.py}}
+\section{Command reference: \cmd{bands\_fit.py}}\label{sec:cmdref}
 
 \begin{center}
 \small

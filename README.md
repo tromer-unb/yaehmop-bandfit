@@ -22,7 +22,8 @@ The **original study** evaluates **six Ge/Sn chalcogenides** — **GeS, GeSe, Ge
 
 ~~~bash
 # 1) Explore instantly, no electronic-structure calculation
-python3 quick.py
+python3 quick.py          # tour of the saved best fits: DFT of 5 codes, Fe spin, SOC, WanTiBEXOS files
+python3 quick.py paper    # the original study: six Ge/Sn chalcogenides, paper Fig. 4 SnS2, carbon
 
 # 2) Get an explanatory recommendation without any optimization
 python USER_WORKFLOW/strategy_advisor.py --cif STRUCTURE.cif --reference BANDS.png   --goal direct --electronic semiconductor --bands auto
@@ -134,7 +135,7 @@ python3 -m pip install -r requirements.txt
 python3 quick.py
 ```
 
-**That is all you need to see the paper examples.** The command generates saved-band figures, the SnS₂ comparison, six-material summaries, carbon-extension plots, and a PNG-to-bands demonstration in `outputs/quick/`. **No YAeHMOP solver, DFT calculation, optimizer, network download or huge dataset required.**
+**That is all you need to see what the code does.** `quick.py` shows, from the saved fits of `validation/`, EHT fits to raw DFT bands of VASP, Quantum ESPRESSO, SIESTA, FHI-aims and Wannier90 (figures and errors), the ferromagnetic Fe fitted with both spin channels together (moment = PBE), the spin–orbit fits and the WanTiBEXOS files every fit writes (`quick.py dft|spin|soc|wtb` for one part). `quick.py paper` shows the original study: saved-band figures, the SnS₂ comparison, six-material summaries, carbon-extension plots and a PNG-to-bands demonstration. Figures go to `outputs/quick/`. **No YAeHMOP solver, DFT calculation, optimizer, network download or huge dataset required.**
 
 ## Fit YOUR OWN crystal: CIF + PNG → parameters → all EHT bands
 
@@ -142,7 +143,7 @@ python3 quick.py
 
 Provide **structure.cif** + **bands.png** (or exact numeric CSV), edit one **file.ini** containing the plot energy limits and **correct reciprocal path**, and run:
 
-> **Raw DFT data as reference:** point the program to the folder of a VASP, Quantum ESPRESSO, SIESTA or FHI-aims band-structure calculation (`--dft-dir FOLDER --dft-code vasp|qe|siesta|aims`) and it fits to the eigenvalues themselves, no image needed. Every fit writes `OUTDIR/fitting/` with the Hückel parameters, the comparison figures (reference blue, EHT red dashed, errors in the figure) and the YAeHMOP Hamiltonian and overlap matrices as plain text (`huckel-NP.dat` in the WanTiBEXOS format). See [DFT references](docs/DFT_REFERENCE.md) and the examples in [validation/](validation/README.md).
+> **Raw DFT data as reference:** point the program to the folder of a VASP, Quantum ESPRESSO, SIESTA or FHI-aims band-structure calculation (`--dft-dir FOLDER --dft-code vasp|qe|siesta|aims`) and it fits to the eigenvalues themselves, no image needed. Every fit writes `OUTDIR/fitting/` with the Hückel parameters, the comparison figures (reference blue, EHT red dashed, errors in the figure) and the YAeHMOP Hamiltonian and overlap matrices as plain text (`huckel-NP.dat` in the WanTiBEXOS format, with the position matrix of the basis `huckel-NP_r.dat` for excitons and optics). See [DFT references](docs/DFT_REFERENCE.md) and the examples in [validation/](validation/README.md).
 
 > Instead of a CIF you can give the structure file of **VASP** (POSCAR/CONTCAR/OUTCAR/vasprun.xml), **Quantum ESPRESSO** (pw.x input, any `ibrav`, or output), **SIESTA** (.fdf/.XV/.STRUCT_OUT) or **FHI-aims** (geometry.in/output); the format is detected automatically. See [structure formats](docs/STRUCTURE_FORMATS.md).
 

@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""One-command, research-faithful showcase: saved data ONLY, no physics runs.
+"""YAeHMOP BandFit quick tour: saved results only, no solver, no DFT, no fit (a few seconds).
 
 Usage:
-  python quick.py                 # P5 six chalcogenides FIRST, Fig. 4 SnS2 + carbon
+  python quick.py                 # tour of what the code does now, from the saved fits of validation/:
+                                  #   DFT fits of 5 codes, metal + spin (joint fit), spin-orbit, WanTiBEXOS files
+  python quick.py dft             # gapped DFT fits (VASP, QE, SIESTA, FHI-aims, Wannier90)
+  python quick.py spin            # bcc Fe: metal, two spin channels, joint fit with one Fermi level
+  python quick.py soc             # spin-orbit fits (on-site lambda L.S)
+  python quick.py wtb             # the WanTiBEXOS files every fit writes (huckel-*.dat, basis_set-*)
+
+  python quick.py paper           # the original study: six Ge/Sn chalcogenides FIRST, Fig. 4 SnS2, carbon
   python quick.py sns2            # Figure 4: SnS2 2/4/6/8 fitted bands
   python quick.py materials       # All six Ge/Sn systems across 2/4/6/8
   python quick.py chemical-transfer # Leave-one-compound-out, NOT a direct fit
@@ -12,6 +19,8 @@ Usage:
   python quick.py carbon          # Saved full EHT bands graphene/diamond/graphite
   python quick.py image           # Synthetic RGB -> bitplane PNG, no solver
 
+To fit your own material: band_fit_gui.py (graphical interface) or USER_WORKFLOW/bands_fit.py
+(command line; manual, section "Fitting from the command line").
 Only stdlib+NumPy+matplotlib+Pillow and dependencies in requirements.txt.
 """
 from __future__ import annotations
@@ -172,47 +181,200 @@ def image(out):
     print("  →",png,"(two original synthetic curves encoded in separate bits)")
     print("  →",dest/"extraction_preview.png")
     print(f"  Round-trip encoding error: {qa['encode_roundtrip_rmse_eV']:.4f} eV")
+
+# ============================================================================
+# Tour of the current features: the saved best fits of validation/
+# ============================================================================
+VAL=ROOT/"validation"
+# (label, DFT code, folder of the fit): the best fit of each material (manual, "Validation: best fits")
+DFT_FITS=[
+    ("MoS2 monolayer, PBE","FHI-aims","aims/MoS2_monolayer_pbe/fitting/refine-bands"),
+    ("Si diamond, LDA","Quantum ESPRESSO","qe/Si_diamond_lda/fitting/window-ga-basis"),
+    ("Si wurtzite, LDA","Quantum ESPRESSO","qe/Si_wurtzite_lda/fitting/window-ga-basis"),
+    ("SiC zincblende, PBE","Quantum ESPRESSO","qe/SiC_zincblende_pbe/fitting/window-ga-basis"),
+    ("Al2O2 bilayer","SIESTA","siesta/Al2O2_bilayer_test/fitting/v1c3-cmaes-basis-8k"),
+    ("C nanoribbon (1D), PBE","SIESTA","siesta/CNR_nanoribbon_1d_pbe/fitting/window-ga-basis"),
+    ("In2S2 monolayer, PBE","VASP","vasp/In2S2_monolayer_pbe/fitting/refine-bands3"),
+    ("TiBr2 monolayer, PBE","VASP","vasp/TiBr2_monolayer_pbe/fitting/window-ga"),
+    ("ZnI2 monolayer, PBE","VASP","vasp/ZnI2_monolayer_pbe/fitting/refine-bands"),
+    ("GaN monolayer, PBE","Wannier90","wannier90/GaN_monolayer_qe_pbe/fitting/refine-bands"),
+    ("Si diamond, PBE","Wannier90","wannier90/Si_diamond_vasp_pbe/fitting/refine-bands"),
+    ("TiBr2 monolayer, PBE","Wannier90","wannier90/TiBr2_monolayer_vasp_pbe/fitting/window-cmaes"),
+]
+SOC_FITS=[
+    ("MoS2 monolayer, HSE06+SOC","FHI-aims","aims/MoS2_monolayer_hse06_soc/fitting/soc-from-window-ga"),
+    ("MoS2 monolayer, PBE+SOC","SIESTA","siesta/MoS2_monolayer_pbe_soc/fitting/soc-from-aims-window-cmaes"),
+    ("In2S2 monolayer, PBE+SOC","VASP","vasp/In2S2_monolayer_pbe_soc/fitting/soc-from-window-cmaes"),
+    ("ZnI2 monolayer, PBE+SOC","VASP","vasp/ZnI2_monolayer_pbe_soc/fitting/soc-from-window-ga-basis"),
+]
+FE=VAL/"vasp/Fe_bcc_pbe_spin/fitting"
+
+def _summary(d):
+    return json.loads((d/"fit_summary.json").read_text())
+
+def _copy_figure(src,dest):
+    if not src.is_file():
+        return None
+    dest.parent.mkdir(parents=True,exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    return dest
+
+def _gallery(figs,out,title,ncol=4):
+    """Thumbnails of saved figures in one overview picture."""
+    from PIL import Image
+    figs=[(t,f) for t,f in figs if f is not None]
+    if not figs:
+        return
+    nrow=(len(figs)+ncol-1)//ncol
+    fig,axs=plt.subplots(nrow,ncol,figsize=(4.2*ncol,3.2*nrow+0.6))
+    for ax in np.atleast_1d(axs).ravel():
+        ax.axis("off")
+    for ax,(t,f) in zip(np.atleast_1d(axs).ravel(),figs):
+        im=Image.open(f);im.thumbnail((900,700))
+        ax.imshow(im);ax.set_title(t,fontsize=9.5)
+    fig.suptitle(title,fontsize=15,weight="bold")
+    fig.tight_layout()
+    save(fig,out)
+
+def tour_dft(out):
+    print("\n[DFT] Fits to raw DFT bands of five codes (window objective; blue DFT, red dashed EHT)")
+    print(f"  {'material':26s} {'code':17s} {'RMS window':>10s} {'RMS ±2 eV':>10s} {'gap error':>10s}   folder")
+    figs=[]
+    for label,code,rel in DFT_FITS:
+        d=VAL/rel
+        s=_summary(d);w=s.get("window_metrics") or {}
+        rw,r2,g=w.get("window_rms_eV"),w.get("rms_within_2eV_of_EF_eV"),w.get("gap_error_eV",s.get("gap_error_eV"))
+        f=lambda v,fmt="{:.3f}":fmt.format(v) if v is not None else "-"
+        print(f"  {label:26s} {code:17s} {f(rw):>10s} {f(r2):>10s} {f(g,'{:+.3f}'):>10s}   validation/{rel}")
+        name=rel.split("/")[1]+"_"+rel.split("/")[0]
+        figs.append((f"{label} ({code})",_copy_figure(d/"bands_full_comparison.png",out/"dft"/f"{name}.png")))
+    print("  (eV; RMS of EHT - DFT in the fitted window and within 2 eV of the gap; every folder has the")
+    print("   parameters, figures and H(R), S(R) files; the INIs of these fits are in validation/refine*/)")
+    _gallery(figs,out/"dft_overview.png","EHT fits to DFT bands of five codes · saved results")
+
+def tour_spin(out):
+    print("\n[SPIN] bcc Fe (VASP PBE, ferromagnetic metal): two spin channels, metal objective")
+    j=json.loads((FE/"metal-joint/joint_fit.json").read_text())
+    j1=json.loads((FE/"metal-joint/joint_fit_stage1.json").read_text())
+    sep={ch:_summary(FE/f"metal-cmaes-10k/spin_{ch}") for ch in ("up","down")}
+    w=lambda s:(s.get("window_metrics") or s.get("metrics") or {}).get("window_rms_eV")
+    print(f"  {'fit':42s} {'RMS window up / down':>22s} {'moment (μB)':>12s}")
+    m0=j1["start_metrics"]["moment"]       # the separate tables with the common Fermi level of the model
+    print(f"  {'separate channels (metal-cmaes-10k)':42s} {w(sep['up']):10.3f} / {w(sep['down']):.3f} {m0:12.3f}"
+          "  (free constant per channel)")
+    m1=j1["metrics"];m=j["metrics"]
+    print(f"  {'joint fit, common E_F (stage 1)':42s} {m1['up']['window_rms_eV']:10.3f} / {m1['down']['window_rms_eV']:.3f} "
+          f"{j1['joint']['moment']:12.3f}")
+    print(f"  {'joint fit + weight on the s band (stage 2)':42s} {m['up']['window_rms_eV']:10.3f} / {m['down']['window_rms_eV']:.3f} "
+          f"{j['joint']['moment']:12.3f}")
+    print(f"  PBE moment: {j['joint']['dft_moment']} μB. The joint fit (USER_WORKFLOW/spin_joint_fit.py) runs both channels")
+    print("  with the native spin-polarized bind of the fork and one common Fermi level: no alignment afterwards.")
+    figs=[(f"Fe, joint fit, spin {ch}",_copy_figure(FE/f"metal-joint/spin_{ch}/bands_full_comparison.png",out/"spin"/f"Fe_joint_{ch}.png"))
+          for ch in ("up","down")]
+    print("  → huckel-SP.dat for WanTiBEXOS: validation/vasp/Fe_bcc_pbe_spin/fitting/metal-joint/spin_polarized/")
+    _gallery(figs,out/"spin_overview.png","bcc Fe · joint fit of both spin channels · saved results",ncol=2)
+
+def tour_soc(out):
+    print("\n[SOC] Spin-orbit coupling on top of a spinless fit (on-site λ L·S; USER_WORKFLOW/soc_fit.py)")
+    print(f"  {'system':28s} {'code':9s} {'λ (eV)':34s} {'RMS ±2 eV':>9s} {'gap error':>10s}")
+    figs=[]
+    for label,code,rel in SOC_FITS:
+        d=VAL/rel;s=_summary(d);m=s.get("metrics_with_soc") or {}
+        lam=", ".join(f"{k} {v:.3f}" for k,v in (s.get("lambdas_eV") or {}).items())
+        r2=m.get("rms_within_2eV_of_EF_eV");g=m.get("gap_error_eV")
+        print(f"  {label:28s} {code:9s} {lam:34s} {r2 if r2 is None else f'{r2:9.3f}'} {g if g is None else f'{g:+10.3f}'}")
+        figs.append((f"{label} ({code})",_copy_figure(d/"bands_full_comparison.png",out/"soc"/(rel.split("/")[1]+".png"))))
+    _gallery(figs,out/"soc_overview.png","Spin-orbit fits · saved results",ncol=2)
+
+def _tb_header(path):
+    import gzip
+    p=Path(path)
+    if not p.is_file() and Path(str(p)+".gz").is_file():
+        p=Path(str(p)+".gz")
+    opener=gzip.open if p.suffix==".gz" else open
+    with opener(p,"rt") as f:
+        head=[next(f).strip() for _ in range(8)]
+    return p,head
+
+def tour_wtb(out):
+    print("\n[WTB] Every fit writes its Hamiltonian for WanTiBEXOS (read with DFT= S):")
+    for label,rel,tb,basis in (("Si diamond (spinless)","qe/Si_diamond_lda/fitting/window-ga-basis","huckel-NP.dat","basis_set-NP"),
+                               ("MoS2 HSE06 + SOC","aims/MoS2_monolayer_hse06_soc/fitting/soc-from-window-ga","huckel-SOC.dat","basis_set-SOC"),
+                               ("Fe, spin polarized","vasp/Fe_bcc_pbe_spin/fitting/metal-joint/spin_polarized","huckel-SP.dat","basis_set-SP")):
+        d=VAL/rel
+        try:
+            p,h=_tb_header(d/tb)
+        except (OSError,StopIteration):
+            continue
+        print(f"  {label:22s} {p.relative_to(ROOT)}: type {h[0]}, {h[6]} basis functions, {h[7]} cells"
+              + (f" (+ {basis})" if (d/basis).is_file() else ""))
+    print("  Layout (as siesta2wtb.py): type, scissors, Fermi level (0), 3 lattice vectors [Å], basis size,")
+    print("  number of cells, then 'Rx Ry Rz i j ReH ImH S' per element; H(R) - E_F*S(R), so E_F = 0.")
+    print("  New exports also write huckel-*_r.dat, the position matrix <m,0|r|n,R> of the Slater basis")
+    print("  (BSE_CENTER_FILE, for excitons and optics), in the frame of the YAeHMOP run.")
+
+def tour(out,which):
+    print("\nYAeHMOP BAND FIT | QUICK TOUR · SAVED RESULTS OF validation/")
+    print("NO DFT / NO FIT / NO SOLVER / NO INTERNET")
+    if which in ("tour","dft"):tour_dft(out)
+    if which in ("tour","spin"):tour_spin(out)
+    if which in ("tour","soc"):tour_soc(out)
+    if which in ("tour","wtb"):tour_wtb(out)
+    print("\nNext: fit your own material with the graphical interface (python band_fit_gui.py) or from the")
+    print("command line (python USER_WORKFLOW/bands_fit.py settings.ini --dft-dir FOLDER --dft-code vasp --outdir runs/X;")
+    print("manual/manual.pdf, section 'Fitting from the command line'). The original study: python quick.py paper")
+
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__,
       formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("example",nargs="?",default="all",
-      choices=("all","best","sns2","SnS2","materials","chemical-transfer",
+    p.add_argument("example",nargs="?",default="tour",
+      choices=("tour","dft","spin","soc","wtb",
+               "paper","all","best","sns2","SnS2","materials","chemical-transfer",
                "GeS","GeSe","GeTe","SnSe","SnTe",
                "graphene","transfer","carbon-transfer","carbon","image"),
-      help="default all: P5 Ge/Sn matched-window fits FIRST, paper Fig.4 SnS2,"
-           "then P6/P7 carbon extension and a tiny PNG input demo")
+      help="default tour: the current features from the saved fits of validation/; paper (or all): the "
+           "original study (P5 Ge/Sn matched-window fits, Fig. 4 SnS2, P6/P7 carbon, PNG demo); the other "
+           "names show one part")
     p.add_argument("--outdir",type=Path,default=Path("outputs/quick"),
                    help="Output folder (default: outputs/quick)")
     a=p.parse_args(argv)
     style();out=a.outdir
+    if a.example in ("tour","dft","spin","soc","wtb"):
+        tour(out,a.example)
+        print("\nDONE. Open PNG figures in",out.resolve())
+        return 0
+    paper(out,"all" if a.example=="paper" else a.example)
+    print("\nDONE. Open PNG figures in",out.resolve())
+    return 0
+
+def paper(out,example):
+    """The original study, as the earlier quick.py: saved results of the paper and the carbon extension."""
     sys.path.insert(0,str(ROOT/"scripts"))
     from chalcogenide_showcase import (
         make_global,make_heatmap,individual,winners,MATERIALS)
     print("\nYAeHMOP BAND FIT | COMPLETE PAPER · INSTANT SAVED EXAMPLES")
     print("P5 original Ge/Sn chalcogenides (2/4/6/8 bands) + P6/P7 carbon extension")
     print("NO DFT / NO FIT / NO SOLVER / NO INTERNET")
-    if a.example in ("all","best","materials"):
+    if example in ("all","best","materials"):
         print("\n[1] MAIN STUDY · six Ge/Sn chalcogenides, matched windows")
         make_global(out)
         make_heatmap(out,"direct")
         winners()
-    if a.example in ("all","sns2","SnS2"):
+    if example in ("all","sns2","SnS2"):
         print("\n[2] PAPER FIGURE 4 · SnS2, matched 2/4/6/8 bands")
         individual(out,"SnS2")
-    elif a.example in MATERIALS:
-        print("\n[2] INDIVIDUAL MATERIAL ·",a.example)
-        individual(out,a.example)
-    if a.example in ("all","chemical-transfer"):
+    elif example in MATERIALS:
+        print("\n[2] INDIVIDUAL MATERIAL ·",example)
+        individual(out,example)
+    if example in ("all","chemical-transfer"):
         print("\n[3] CHEMICAL TRANSFER · hold out one of six Ge/Sn compounds")
         make_heatmap(out,"zero-shot")
-    if a.example in ("all","best"):
+    if example in ("all","best"):
         print("\n[4] SEPARATE CARBON EXTENSION (different PBE references)")
         results(out)
-    if a.example in ("all","graphene"):graphene(out)
-    if a.example in ("all","transfer","carbon-transfer"):transfer(out)
-    if a.example in ("all","carbon"):carbon(out)
-    if a.example in ("all","image"):image(out)
-    print("\nDONE. Open PNG figures in",out.resolve())
-    return 0
+    if example in ("all","graphene"):graphene(out)
+    if example in ("all","transfer","carbon-transfer"):transfer(out)
+    if example in ("all","carbon"):carbon(out)
+    if example in ("all","image"):image(out)
 if __name__=="__main__":
     raise SystemExit(main())

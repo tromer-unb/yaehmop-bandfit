@@ -27,7 +27,7 @@ python family_fit.py family.yaml --fit --budget 2000 --optimizer cmaes --polish 
 python family_fit.py family.yaml --evaluate out/family/fit/fit.json --outdir out/eval
 """
 from __future__ import annotations
-import argparse,json,shutil,sys
+import argparse,json,os,shutil,sys
 from pathlib import Path
 import numpy as np
 import yaml
@@ -358,8 +358,11 @@ def main(argv=None):
     p.add_argument('--fast-budget',type=int,default=None,
        help='optimizer alternating: evaluations of the fast Hii/K stages (cached S(k); default 10 x budget)')
     p.add_argument('--no-export',action='store_true',help='skip the per-system fitting/ export of H(R), S(R)')
+    p.add_argument('--no-rmatrix',action='store_true',help='do not write huckel-NP_r.dat, the position matrix of the Slater basis (WanTiBEXOS BSE_CENTER_FILE), in the fitting/ exports')
     p.add_argument('--outdir',type=Path,default=Path('outputs/family_fit'))
     args=p.parse_args(argv)
+    if args.no_rmatrix:
+        os.environ['BANDFIT_RMATRIX']='0'
     try:
         path,m,train,test=load_manifest(args.manifest)
     except (ValueError,FileNotFoundError) as exc:

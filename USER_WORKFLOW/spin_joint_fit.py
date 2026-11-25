@@ -115,8 +115,11 @@ def main():
     ap.add_argument("--reg-weight", type=float, default=0.04)
     ap.add_argument("--name", default=None)
     ap.add_argument("--outdir", type=Path, required=True)
+    ap.add_argument("--no-rmatrix", action="store_true", help="do not write huckel-*_r.dat, the position matrix of the Slater basis (WanTiBEXOS BSE_CENTER_FILE; it takes seconds to minutes for large cells)")
     ap.add_argument("--no-native-check", action="store_true", help="skip spin_combine's native bind check")
     a = ap.parse_args()
+    if a.no_rmatrix:
+        os.environ["BANDFIT_RMATRIX"]="0"
 
     bind, _ = resolve_yaehmop_assets()
     feats = bind_features(bind)

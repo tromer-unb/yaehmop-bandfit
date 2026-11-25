@@ -52,10 +52,12 @@ huckel-SOC.dat         spinor H(R), S(R) in the WanTiBEXOS SOC format: SOC / sci
                        H(R) - E_mid*S(R) (x) I2 plus lambda L.S on R = 0 (E_mid in
                        fit_summary.json), so energies are relative to the EHT midgap.
 basis_set-SOC          WanTiBEXOS basis file (spin column 1 / -1)
+huckel-SOC_r.dat       position matrix <m,0|r|n,R> (A) of the spinor basis, seedname_r.dat layout
+                       (WanTiBEXOS BSE_CENTER_FILE); spin diagonal, the up-down blocks are zero
 orbitals.dat           spinless orbital list (index, atom, orbital, l, m)
 bands_comparison.*     2 VB + 2 CB with SOC: DFT blue, EHT+SOC red dashed, errors
 bands_full_comparison.* all bands in the window
-POSCAR                 structure used
+POSCAR                 structure used, in the Cartesian frame of the YAeHMOP run (as huckel-SOC.dat)
 fit_summary.json       lambdas, errors with and without SOC, settings
 """
 
@@ -83,6 +85,8 @@ def main():
     ap.add_argument("--emin", type=float, default=-6.0); ap.add_argument("--emax", type=float, default=6.0)
     ap.add_argument("--name"); ap.add_argument("--outdir", type=Path, required=True)
     ap.add_argument("--fitting-dir", type=Path)
+    ap.add_argument("--no-rmatrix", action="store_true",
+                    help="do not write huckel-SOC_r.dat (position matrix of the basis, WanTiBEXOS BSE_CENTER_FILE)")
     ap.add_argument("--engine", choices=("numpy", "bind"), default="numpy",
                     help="numpy: cached spinless H(k), S(k) + lambda L.S in numpy (default); bind: every evaluation "
                          "is a native `bind --soc` run (needs github.com/ac-dias/yaehmop)")
@@ -248,8 +252,23 @@ def main():
     kept = [(R, H.real, S.real) for R, H, S in cells if max(np.abs(H).max(), np.abs(S).max()) > 1e-7]
     Em = soc_bands(Hm, Sm, Hsoc)
     allE = np.vstack([E, Em]); e_mid = .5 * (allE[:, nelec].min() + allE[:, nelec - 1].max())
-    write_wtb_soc(fdir / "huckel-SOC.dat", kept, atoms.cell, labels, Hsoc, e_mid, atoms.positions, syms,
+    # lattice vectors, R and basis positions in the Cartesian frame of the YAeHMOP run (orientation of its
+    # p, d orbitals), as bands_fit.py writes huckel-NP.dat
+    from yaehmop_generic import yaehmop_frame, contiguous_along_vacuum
+    atoms_y = yaehmop_frame(contiguous_along_vacuum(atoms, dim))
+    write_wtb_soc(fdir / "huckel-SOC.dat", kept, atoms_y.cell, labels, Hsoc, e_mid, atoms_y.positions, syms,
                   fdir / "basis_set-SOC")
+    write(fdir / "POSCAR", atoms_y, format="vasp", direct=True)
+    # position matrix (spin diagonal: the same X in both spin blocks), as yaehmop2wtb.py --rmatrix
+    rmat = None
+    from position_matrix import rmatrix_enabled, position_matrix, write_rmatrix
+    if rmatrix_enabled() and not a.no_rmatrix:
+        Rs = [tuple(int(v) for v in R) for R, _, _ in kept]
+        X, Sq = position_matrix(atoms_y.positions, syms, params, atoms_y.cell, Rs, [S for _, _, S in kept])
+        write_rmatrix(fdir / "huckel-SOC_r.dat", Rs, [X, X], name)
+        rmat = dict(file="huckel-SOC_r.dat",
+                    max_S_quadrature_minus_S_eht=float(max(np.abs(Sq[i] - kept[i][2]).max() for i in range(len(kept)))))
+        print(f"RMATRIX huckel-SOC_r.dat: max |S(quadrature) - S(YAeHMOP)| = {rmat['max_S_quadrature_minus_S_eht']:.1e}")
     # check: the written file reproduces the bands on the path
     I2 = np.eye(2); errs = []
     for idx in range(0, len(kpts), max(1, len(kpts) // 12)):
@@ -277,7 +296,8 @@ def main():
                    spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down",
                    huckel_SOC_check_max_error_eV=float(max(errs)), n_orbitals_spinless=n,
                    w_split=a.w_split, split_pairs=a.split_pairs,
-                   n_cells=len(kept), objective_settings=wset.to_dict(), engine=a.engine, native_soc=native)
+                   n_cells=len(kept), objective_settings=wset.to_dict(), engine=a.engine, native_soc=native,
+                   position_matrix=rmat)
     summary = portable_paths(json.loads(json.dumps(summary, default=float)), fdir)
     (fdir / "fit_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (fdir / "README.txt").write_text(README)

@@ -263,6 +263,18 @@ def main():
             for r in rows:
                 p = r.split()
                 f.write(f"{int(p[0]) + off}   {'   '.join(p[1:7])}   {spin}\n")
+    # position matrix: the X of each channel in its spin block (r is spin diagonal)
+    rfiles = [c["dir"] / "huckel-NP_r.dat" for c in (up, dn)]
+    rmatrix = None
+    if all(f.is_file() or Path(str(f) + ".gz").is_file() for f in rfiles):
+        from position_matrix import read_rmatrix, write_rmatrix
+        (_, Xu), (_, Xd) = read_rmatrix(rfiles[0]), read_rmatrix(rfiles[1])
+        Rs = sorted(set(Xu) | set(Xd), key=lambda R: (sum(map(abs, R)), R))
+        zero = np.zeros((n, n, 3))
+        write_rmatrix(out / "huckel-SP_r.dat", Rs, [np.array([Xu.get(R, zero) for R in Rs]),
+                                                    np.array([Xd.get(R, zero) for R in Rs])], "two spin channels")
+        rmatrix = "huckel-SP_r.dat"
+        print("RMATRIX huckel-SP_r.dat (from the huckel-NP_r.dat of the two channels)", flush=True)
     shutil.copy(up["dir"] / "parameters_huckel.dat", out / "parameters_huckel_up.dat")
     shutil.copy(dn["dir"] / "parameters_huckel.dat", out / "parameters_huckel_down.dat")
     for fname in ("orbitals.dat", "POSCAR"):
@@ -273,7 +285,8 @@ def main():
                    shift_up_eV=up["shift"], shift_down_eV=dn["shift"],
                    K_EHT_up=up["summary"].get("K_EHT"), K_EHT_down=dn["summary"].get("K_EHT"),
                    energy_zero="DFT Fermi level; each channel shifted by (DFT midgap of the channel - E_F); 0 for a metal (already at E_F)",
-                   spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero")
+                   spinor_basis="2n functions: orbitals 1..n spin up, n+1..2n spin down; up-down blocks zero",
+                   position_matrix=rmatrix)
     if not a.no_native:
         try:
             summary["native_spin"] = native_spin(up, dn, out, a.mesh_radius, align=not a.no_align)
@@ -304,6 +317,8 @@ def main():
         "                 2n orbitals / n cells / R_x R_y R_z [A] i j ReH ImH S; orbitals 1..n spin up,\n"
         "                 n+1..2n spin down; up-down blocks zero; energies relative to the DFT Fermi level\n"
         "basis_set-SP     WanTiBEXOS basis file (spin column 1 / -1)\n"
+        "huckel-SP_r.dat  position matrix <m,0|r|n,R> (A) of the two channels (WanTiBEXOS BSE_CENTER_FILE),\n"
+        "                 when the channel fits wrote huckel-NP_r.dat\n"
         "parameters_huckel_up.dat / _down.dat   the EHT parameters of each channel\n")
     print("SPIN_COMBINE_DONE", out / "huckel-SP.dat", f"2n = {2 * n}, cells = {len(cells)}",
           f"shifts up {up['shift']:+.3f} eV, down {dn['shift']:+.3f} eV")

@@ -239,6 +239,18 @@ def write_periodic_input_generic(cif_path,out_path,band_path,k_const=1.75,weight
     lines.append(''); out_path.write_text('\n'.join(lines)); return out_path
 
 
+def yaehmop_frame(atoms):
+    """The structure in the Cartesian frame of the YAeHMOP run: bind rebuilds the cell from the
+    'Crystal Spec' lengths and angles (a along x, b in the xy plane), so the orientation of its p, d, f
+    orbitals is that of this frame. The files for WanTiBEXOS (lattice vectors, R in huckel-*.dat,
+    basis positions, position matrix) must use it; the bands do not depend on the frame."""
+    a=atoms.copy()
+    (la,lb,lc),(al,be,ga)=atoms.cell.lengths(),np.radians(atoms.cell.angles())
+    cx=lc*np.cos(be);cy=lc*(np.cos(al)-np.cos(be)*np.cos(ga))/np.sin(ga)
+    cell=np.array([[la,0,0],[lb*np.cos(ga),lb*np.sin(ga),0],[cx,cy,np.sqrt(max(lc*lc-cx*cx-cy*cy,0.0))]])
+    a.set_cell(cell,scale_atoms=True)
+    return a
+
 def orbital_labels(params,symbols):
     """Atom/orbital label of every basis function, in YAeHMOP order (s, p, d, f)."""
     shapes={"s":["s"],"p":["px","py","pz"],"d":["dx2-y2","dz2","dxy","dxz","dyz"],

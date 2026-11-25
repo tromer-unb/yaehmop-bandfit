@@ -35,7 +35,7 @@ class QuickShowcaseTests(unittest.TestCase):
     def test_one_command_without_solver(self):
         with tempfile.TemporaryDirectory() as temp:
             dest=Path(temp)/"demo"
-            result=subprocess.run([sys.executable,str(R/"quick.py"),"--outdir",str(dest)],
+            result=subprocess.run([sys.executable,str(R/"quick.py"),"paper","--outdir",str(dest)],
                   cwd=R,capture_output=True,text=True,timeout=35,check=True)
             for p in [
               "overall_2_4_6_8.png","six_materials_direct.png",
@@ -53,6 +53,30 @@ class QuickShowcaseTests(unittest.TestCase):
             self.assertIn("0.1657",result.stdout)
             self.assertIn("0.1564",result.stdout)
             self.assertIn("NO DFT / NO FIT / NO SOLVER",result.stdout)
+    def test_default_tour_of_current_features(self):
+        """quick.py with no argument: the saved best fits of validation/ (DFT, spin, SOC, WanTiBEXOS)."""
+        with tempfile.TemporaryDirectory() as temp:
+            dest=Path(temp)/"tour"
+            result=subprocess.run([sys.executable,str(R/"quick.py"),"--outdir",str(dest)],
+                  cwd=R,capture_output=True,text=True,timeout=60,check=True)
+            for p in ["dft_overview.png","spin_overview.png","soc_overview.png",
+                      "dft/MoS2_monolayer_pbe_aims.png","spin/Fe_joint_up.png"]:
+                self.assertGreater((dest/p).stat().st_size,1000,p)
+            out=result.stdout
+            self.assertIn("NO DFT / NO FIT / NO SOLVER",out)
+            for code in ("FHI-aims","Quantum ESPRESSO","SIESTA","VASP","Wannier90"):
+                self.assertIn(code,out)
+            self.assertIn("joint fit + weight on the s band",out)
+            self.assertIn("2.210",out)                  # moment of the joint Fe fit
+            self.assertIn("Mo-d 0.063, S-p 0.198",out)  # SOC of MoS2 (HSE06)
+            self.assertIn("type SP, 18 basis functions",out)
+            self.assertIn("python quick.py paper",out)
+    def test_tour_parts(self):
+        for part,needle in (("dft","[DFT]"),("spin","[SPIN]"),("soc","[SOC]"),("wtb","[WTB]")):
+            with self.subTest(part=part),tempfile.TemporaryDirectory() as temp:
+                r=subprocess.run([sys.executable,str(R/"quick.py"),part,"--outdir",str(Path(temp)/part)],
+                    cwd=R,capture_output=True,text=True,timeout=60,check=True)
+                self.assertIn(needle,r.stdout)
     def test_first_screen_readme_has_quick(self):
         readme=(R/"README.md").read_text()
         prefix=readme[:1800]

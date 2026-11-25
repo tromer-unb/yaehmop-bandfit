@@ -9,8 +9,9 @@
 # Best results first — real saved EHT bands, instant examples
 
 The command `python3 quick.py carbon` or `python3 quick.py graphene` explores
-carbon; `python3 quick.py` also shows the original Ge/Sn results **first** and
-then generates the **carbon extension** entirely offline, using archived numerical YAeHMOP predictions and previously audited summary errors. It is intended for **readers of the paper who want to see the best working examples immediately**, not to train a new Hamiltonian.
+carbon; `python3 quick.py paper` also shows the original Ge/Sn results **first** and
+then generates the **carbon extension** entirely offline (`python3 quick.py` alone is the tour of the
+current features: the saved DFT, spin and SOC fits of `validation/`), using archived numerical YAeHMOP predictions and previously audited summary errors. It is intended for **readers of the paper who want to see the best working examples immediately**, not to train a new Hamiltonian.
 
 ## One-command gallery
 

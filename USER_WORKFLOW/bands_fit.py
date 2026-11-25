@@ -339,7 +339,7 @@ def write_tb_header(fermi,cell,nbasis,nvec):
     s+="".join(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n" for v in np.asarray(cell))
     return s+f"{nbasis}\n{nvec}\n"
 
-def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None,energy_zero=None):
+def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_index=None,energy_zero=None,rmatrix=None):
     """Text files with the YAeHMOP Hamiltonian and overlap of the final parameters.
 
     Two extra YAeHMOP runs ('K points' + Dump Hamil/Overlap): the full
@@ -355,6 +355,9 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     from yaehmop_generic import contiguous_along_vacuum
     atoms=contiguous_along_vacuum(read_structure(structure,sfmt),dim);syms=atoms.get_chemical_symbols()
     params=subset_for_elements(parse_parameter_table(parameters),list(dict.fromkeys(syms)))
+    # the Cartesian frame of the YAeHMOP run (orientation of its p, d orbitals) for the WanTiBEXOS files
+    from yaehmop_generic import yaehmop_frame
+    atoms_y=yaehmop_frame(atoms)
     nelec=valence_electrons(params,syms);nocc=nelec//2
     images=overlap_images_for(dim,radius)
     mesh=gamma_mesh(dim,radius);kpoints=np.asarray(kpoints,float)
@@ -405,7 +408,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
         metal=dict(eht_fermi_eV=mid,states_below_EF_per_cell_mesh=float(np.sum(eigm<=mid)/len(mesh)),
                    mesh_note="Gamma-centred (2r+1)^dim mesh, equal weights, no smearing: a rough count")
     labels=orbital_labels(params,syms);n=len(labels)
-    cell=np.asarray(atoms.cell)
+    cell=np.asarray(atoms_y.cell)
     fdir=Path(fdir)
     # WanTiBEXOS non-orthogonal TB file (same layout as siesta2wtb.py, spinless 'NP').
     # wtb.x diagonalizes (H(k) - E_F*I, S(k)), which is not a rigid shift when S != I;
@@ -419,13 +422,29 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
                 for j in range(n):
                     f.write(f"{r[0]:.8f}   {r[1]:.8f}   {r[2]:.8f}   {i+1}   {j+1}   "
                             f"{Hs[i,j]:.10f}   0.0000000000   {S[i,j]:.10f}\n")
-    pos=atoms.positions
+    pos=atoms_y.positions
     with open(fdir/"basis_set-NP","w") as f:
         f.write("bindex aspecie ax ay az l m spin\n")
         for b,lab in enumerate(labels):
             atom,orb=lab.split(":");ia=int("".join(c for c in atom if c.isdigit()))-1
             l,m=ORBITAL_LM[orb]
             f.write(f"{b+1}   {syms[ia]}   {pos[ia,0]:.8f}   {pos[ia,1]:.8f}   {pos[ia,2]:.8f}   {l}   {m}   0\n")
+    # Position matrix <m,0|r|n,R> of the Slater basis (WanTiBEXOS BSE_CENTER_FILE), as
+    # yaehmop2wtb.py --rmatrix; checked by the overlap of the same quadrature
+    rmat=None
+    if rmatrix is None:
+        from position_matrix import rmatrix_enabled
+        rmatrix=rmatrix_enabled()
+    if rmatrix:
+        from position_matrix import position_matrix,write_rmatrix
+        Rs=[tuple(int(v) for v in R) for R,_,_ in kept]
+        X,Sq=position_matrix(pos,syms,params,cell,Rs,[S for _,_,S in kept])
+        write_rmatrix(fdir/"huckel-NP_r.dat",Rs,[X],Path(structure).name)
+        dS=float(max(np.abs(Sq[i]-kept[i][2]).max() for i in range(len(kept))))
+        rmat=dict(file="huckel-NP_r.dat",max_S_quadrature_minus_S_eht=dS,
+                  note="<m,0|r|n,R> (Angstrom, absolute) of the Slater basis, seedname_r.dat layout "
+                       "(WanTiBEXOS BSE_CENTER_FILE); S of the same quadrature vs YAeHMOP's S(R)")
+        print(f"RMATRIX huckel-NP_r.dat: max |S(quadrature) - S(YAeHMOP)| = {dS:.1e}",flush=True)
     with open(fdir/"orbitals.dat","w") as f:
         f.write("# index  atom  orbital  l  m   (YAeHMOP order)\n")
         for b,lab in enumerate(labels):
@@ -447,7 +466,7 @@ def export_matrices(structure,sfmt,parameters,K,kpoints,dim,radius,fdir,node_ind
     return dict(n_orbitals=n,n_cells=len(kept),overlap_radius=int(radius),mesh_points=len(mesh),
                 max_error_rebuilt_Hk_eV=float(errH),max_error_rebuilt_Sk=float(errS),
                 eht_vbm_eV=vbm,eht_cbm_eV=cbm,eht_midgap_eV=mid,metal=metal,
-                overlap_min_eigenvalue=smin,warning=warning,
+                overlap_min_eigenvalue=smin,warning=warning,position_matrix=rmat,
                 huckel_NP_energy_zero=("H(R) in huckel-NP.dat is H(R) - eht_midgap_eV*S(R); its Fermi level is 0"
                     if metal is None else "metal: H(R) - E0*S(R), E0 = eht_midgap_eV = EHT energy of the DFT Fermi level; Fermi level 0"),
                 high_symmetry_k_in_hamiltonian_overlap_k=len(nodes))
@@ -474,6 +493,12 @@ huckel-NP.dat              real-space Hamiltonian H(R) and overlap S(R) in the
                            wtb.x reproduces YAeHMOP's bands (wtb.x uses H - E_F*I,
                            which is not a shift when S != I).
 basis_set-NP               WanTiBEXOS basis file: index species x y z [A] l m spin
+huckel-NP_r.dat            position matrix <m,0|r|n,R> (A, absolute coordinates) of the
+                           Slater basis, Wannier90 seedname_r.dat layout: WanTiBEXOS
+                           BSE_CENTER_FILE (DFT= S), for excitons/optics; as
+                           yaehmop2wtb.py --rmatrix. fit_summary.json gives the check
+                           (overlap of the same quadrature vs YAeHMOP's S). Not written
+                           with --no-rmatrix / BANDFIT_RMATRIX=0.
 orbitals.dat               orbital index, atom, orbital, l, m (YAeHMOP order)
 hamiltonian_overlap_k.dat  H(k), S(k) at the high-symmetry points of the figure.
                            Header as huckel-NP.dat (Fermi level = EHT midgap,
@@ -524,12 +549,15 @@ def write_fitting_dir(fdir,outdir,*,structure,sfmt,native,param_txt,K,kpoints,di
         if (fdir/old_file).exists():(fdir/old_file).unlink()
     # The structure used (exact cell of huckel-NP.dat), so that fitting/ is self-contained
     from ase.io import write as ase_write
-    from yaehmop_generic import contiguous_along_vacuum
-    ase_write(fdir/"POSCAR",contiguous_along_vacuum(read_structure(structure,sfmt),dim),format="vasp",direct=True)
+    from yaehmop_generic import contiguous_along_vacuum,yaehmop_frame
+    # in the frame of the YAeHMOP run, as huckel-NP.dat and basis_set-NP (same fractional coordinates)
+    ase_write(fdir/"POSCAR",yaehmop_frame(contiguous_along_vacuum(read_structure(structure,sfmt),dim)),
+              format="vasp",direct=True)
     info=export_matrices(structure,sfmt,native,K,kpoints,dim,radius,fdir,node_index,energy_zero)
     summary=dict(summary,structure_in_fitting="POSCAR",
                  tight_binding_files=dict(info,files=["huckel-NP.dat","basis_set-NP","orbitals.dat",
-                                                              "hamiltonian_overlap_k.dat"]))
+                                                      "hamiltonian_overlap_k.dat"]
+                                          +(["huckel-NP_r.dat"] if info.get("position_matrix") else [])))
     summary=portable_paths(json.loads(json.dumps(summary,default=str)),fdir)
     (fdir/"fit_summary.json").write_text(json.dumps(summary,indent=2)+"\n")
     (fdir/"README.txt").write_text(FITTING_README)
@@ -988,6 +1016,7 @@ def main():
     parser.add_argument("--start-from",type=Path,default=None,
                         help="fitting/ folder of an earlier fit: start from its parameters (and basis), with "
                              "the search bounds centred there ([fit] start_from)")
+    parser.add_argument("--no-rmatrix",action="store_true",help="do not write huckel-*_r.dat, the position matrix of the Slater basis (WanTiBEXOS BSE_CENTER_FILE; it takes seconds to minutes for large cells)")
     parser.add_argument("--fitting-dir",type=Path,default=None,
                         help="folder for the standard fit outputs (parameters, figures, H(k), S(k)); "
                              "default OUTDIR/fitting")
@@ -1009,6 +1038,8 @@ def main():
     dft.add_argument("--dimension",type=int,choices=(1,2,3),help="periodic dimension for a DFT reference "
                      "(default: [band_path] dimension, else detected from the vacuum)")
     args=parser.parse_args()
+    if args.no_rmatrix:
+        os.environ["BANDFIT_RMATRIX"]="0"
     inputs=args.input_file.resolve()
     if not inputs.is_file():parser.error("INI settings file not found: "+str(inputs))
     probe=conf(inputs,required=())

@@ -83,9 +83,13 @@ Every fit of `bands_fit.py` (DFT, image or CSV reference) writes, by default to
 | `bands_full_comparison.png/pdf/csv` | (DFT) all DFT and EHT bands in the `[reference] emin/emax` window |
 | `huckel-NP.dat` | real-space **H(R)** and **S(R)** of YAeHMOP, plain text in the **WanTiBEXOS** non-orthogonal format (same as `siesta2wtb.py`; use `DFT= S`, `PARAMS_FILE= "huckel-NP.dat"`) |
 | `basis_set-NP` | WanTiBEXOS basis file: index, species, x y z (Å), l, m, spin |
+| `huckel-NP_r.dat` | **position matrix** ⟨m,0\|**r**\|n,R⟩ (Å, absolute coordinates) of the Slater basis, Wannier90 `seedname_r.dat` layout: WanTiBEXOS `BSE_CENTER_FILE` (with `DFT= S`) for excitons and optics, as `siesta2wtb.py --rmatrix` and the YAeHMOP interface `yaehmop2wtb.py --rmatrix`. Numerical integrals of YAeHMOP's Slater functions, checked by the overlap of the same quadrature against YAeHMOP's S(R) (`fit_summary.json`, `position_matrix`; ~1e-7). `--no-rmatrix` skips it |
 | `orbitals.dat` | orbital index, atom, orbital name, l, m |
 | `hamiltonian_overlap_k.dat` | H(k), S(k) (raw YAeHMOP values, eV) at the high-symmetry points. Header as in WanTiBEXOS: `NP`, scissors, Fermi level (EHT midgap, absolute), 3 lattice vectors (Å), number of basis orbitals, number of hopping vectors (cells of `huckel-NP.dat`), number of k points; then `k1 k2 k3 i j ReH ImH ReS ImS` |
 | `POSCAR` | the structure used (VASP format; exact cell and atom order of the matrices) |
+
+**Frame.** `bind` rebuilds the cell from its lengths and angles (a along x, b in the xy plane), and its p, d, f orbitals are oriented in that frame. The lattice vectors and R of `huckel-*.dat`, the positions of `basis_set-*`, the position matrix and the `POSCAR` of `fitting/` are therefore written in the frame of the YAeHMOP run (same fractional coordinates as the input structure). For a 3D cell given in another orientation (e.g. the fcc primitive vectors of Si) this differs from the POSCAR of the DFT run; the bands are the same.
+
 | `yaehmop_matrices.bind` | YAeHMOP input of the matrix run (`K points` + `Dump Hamil/Overlap`) |
 | `fit_summary.json`, `README.txt` | metrics, settings, sources, checks; file description |
 

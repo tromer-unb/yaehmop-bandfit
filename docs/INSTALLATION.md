@@ -27,7 +27,8 @@ cd yaehmop-bandfit
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python quick.py                 # See all six Ge/Sn materials + SnS₂ Fig. 4 FIRST
+python quick.py                 # Tour of the saved best fits (DFT of 5 codes, Fe spin, SOC, WanTiBEXOS)
+python quick.py paper           # The original study: all six Ge/Sn materials + SnS₂ Fig. 4 FIRST
 python quick.py sns2            # Just SnS₂ paper Figure 4
 python USER_WORKFLOW/bands_fit.py --help
 ```
